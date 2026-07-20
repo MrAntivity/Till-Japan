@@ -313,9 +313,15 @@ function openModal(html, onMount, extraClass) {
   if (onMount) onMount(modalContent);
 }
 
+// Set by openFilePreview while a multi-page entry is open, so the single
+// persistent keydown listener below can page through it. Cleared on close
+// rather than attaching/detaching a listener per preview open.
+let activePager = null;
+
 function closeModal() {
   modalBackdrop.hidden = true;
   modalContent.innerHTML = '';
+  activePager = null;
 }
 
 modalClose.addEventListener('click', closeModal);
@@ -323,7 +329,14 @@ modalBackdrop.addEventListener('click', (event) => {
   if (event.target === modalBackdrop) closeModal();
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !modalBackdrop.hidden) closeModal();
+  if (modalBackdrop.hidden) return;
+  if (event.key === 'Escape') {
+    closeModal();
+    return;
+  }
+  if (!activePager) return;
+  if (event.key === 'ArrowLeft') activePager.prev();
+  if (event.key === 'ArrowRight') activePager.next();
 });
 
 /* ==================== firestore helpers ==================== */
@@ -1014,6 +1027,11 @@ document.getElementById('contact-list').addEventListener('click', (event) => {
 });
 
 /* ==================== files ==================== */
+/* Every entry stores a `pages` array (usually just one). Uploading several
+   images "together" (e.g. a driver's license front and back) fills that
+   array with multiple pages under one entry, browsable with the pager in
+   the preview modal; uploading them "separate" instead creates one entry
+   per file. */
 
 function folderName(folderId) {
   const f = folders.find((x) => x.id === folderId);
@@ -1028,6 +1046,10 @@ function fileIcon(contentType) {
   if (contentType?.startsWith('video/')) return 'videocam';
   if (contentType?.startsWith('audio/')) return 'audiotrack';
   return 'insert_drive_file';
+}
+
+function totalSize(pages) {
+  return (pages || []).reduce((sum, p) => sum + (p.size || 0), 0);
 }
 
 function formatBytes(bytes) {
@@ -1083,17 +1105,27 @@ function renderFiles() {
   }
 
   list.innerHTML = items
-    .map(
-      (f) => `
+    .map((f) => {
+      const pages = f.pages || [];
+      const multi = pages.length > 1;
+      const icon = multi ? 'photo_library' : fileIcon(pages[0]?.contentType);
+      return `
         <article class="file-card" data-preview-file="${f.id}" tabindex="0" role="button" aria-label="Preview ${escapeHtml(f.name)}">
-          <div class="file-card-icon"><span class="material-symbols-outlined">${fileIcon(f.contentType)}</span></div>
+          <div class="file-card-icon">
+            <span class="material-symbols-outlined">${icon}</span>
+            ${multi ? `<span class="file-card-pages-badge">${pages.length}</span>` : ''}
+          </div>
           <div class="file-card-name">${escapeHtml(f.name)}</div>
-          <p class="file-card-meta">${formatBytes(f.size)}${f.folderId ? ` · ${escapeHtml(folderName(f.folderId))}` : ''}</p>
+          <p class="file-card-meta">${formatBytes(totalSize(pages))}${multi ? ` · ${pages.length} pages` : ''}${f.folderId ? ` · ${escapeHtml(folderName(f.folderId))}` : ''}</p>
           ${f.description ? `<p class="file-card-desc">${escapeHtml(f.description)}</p>` : ''}
           <div class="file-card-actions">
-            <a class="icon-btn icon-btn--sm" href="${escapeHtml(f.downloadURL)}" target="_blank" rel="noopener" download="${escapeHtml(f.fileName || f.name)}" aria-label="Download">
-              <span class="material-symbols-outlined">download</span>
-            </a>
+            ${
+              multi
+                ? ''
+                : `<a class="icon-btn icon-btn--sm" href="${escapeHtml(pages[0]?.downloadURL || '')}" target="_blank" rel="noopener" download="${escapeHtml(pages[0]?.fileName || f.name)}" aria-label="Download">
+                    <span class="material-symbols-outlined">download</span>
+                  </a>`
+            }
             <button type="button" class="icon-btn icon-btn--sm" data-edit-file="${f.id}" aria-label="Edit">
               <span class="material-symbols-outlined">edit</span>
             </button>
@@ -1102,8 +1134,8 @@ function renderFiles() {
             </button>
           </div>
         </article>
-      `
-    )
+      `;
+    })
     .join('');
 }
 
@@ -1149,77 +1181,157 @@ function folderOptionsHtml(selectedId) {
   `;
 }
 
+// Uploads each file in `fileList` to Storage and resolves with their page
+// metadata. Shared by both "separate" (called once per file) and "together"
+// (called once with every selected file) upload modes below.
+async function uploadPages(fileList, onProgress) {
+  const totals = fileList.map((f) => f.size || 0);
+  const transferred = fileList.map(() => 0);
+  const overallTotal = totals.reduce((a, b) => a + b, 0) || 1;
+
+  function reportProgress() {
+    const sum = transferred.reduce((a, b) => a + b, 0);
+    onProgress((sum / overallTotal) * 100);
+  }
+
+  const pages = [];
+  for (let i = 0; i < fileList.length; i += 1) {
+    const file = fileList[i];
+    const safeFileName = file.name.replace(/[/\\]/g, '_');
+    const path = `users/${currentUser.uid}/files/${crypto.randomUUID()}-${safeFileName}`;
+    const fileRef = storageRef(storage, path);
+    const task = uploadBytesResumable(fileRef, file);
+
+    await new Promise((resolve, reject) => {
+      task.on(
+        'state_changed',
+        (snap) => {
+          transferred[i] = snap.bytesTransferred;
+          reportProgress();
+        },
+        reject,
+        resolve
+      );
+    });
+
+    const downloadURL = await getDownloadURL(fileRef);
+    pages.push({
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+      storagePath: path,
+      downloadURL
+    });
+  }
+  return pages;
+}
+
 document.getElementById('add-file-btn').addEventListener('click', () => {
   openModal(
     `
-    <h2>Upload file</h2>
+    <h2>Upload files</h2>
     <form id="upload-form">
-      <label>File<input type="file" name="file" required /></label>
-      <label>Name<input type="text" name="name" required /></label>
+      <label>Files<input type="file" name="files" multiple required /></label>
+      <div class="upload-mode-row" id="upload-mode-row" hidden>
+        <label class="upload-mode-option">
+          <input type="radio" name="mode" value="separate" checked />
+          Upload as separate files
+        </label>
+        <label class="upload-mode-option">
+          <input type="radio" name="mode" value="together" />
+          Group into one file (e.g. front &amp; back)
+        </label>
+      </div>
+      <label id="upload-name-row">Name<input type="text" name="name" /></label>
       <label>Description (optional)<textarea name="description" rows="2"></textarea></label>
       <label>Folder<select name="folderId">${folderOptionsHtml('')}</select></label>
       <div class="upload-progress" id="upload-progress" hidden>
         <div class="upload-progress-bar" id="upload-progress-bar"></div>
       </div>
+      <p class="upload-status" id="upload-status" hidden></p>
       <p class="form-error" id="upload-error" hidden>Upload failed. Try again.</p>
       <button class="button primary" type="submit" id="upload-submit">Upload</button>
     </form>
   `,
     (root) => {
-      const fileInput = root.querySelector('[name="file"]');
+      const fileInput = root.querySelector('[name="files"]');
+      const nameRow = root.querySelector('#upload-name-row');
       const nameInput = root.querySelector('[name="name"]');
+      const modeRow = root.querySelector('#upload-mode-row');
+
+      function currentMode() {
+        return root.querySelector('input[name="mode"]:checked')?.value || 'separate';
+      }
+
+      function syncNameField() {
+        const count = fileInput.files.length;
+        const showName = count <= 1 || currentMode() === 'together';
+        nameRow.hidden = !showName;
+        nameInput.required = showName;
+      }
 
       fileInput.addEventListener('change', () => {
-        if (fileInput.files[0] && !nameInput.value) {
-          nameInput.value = fileInput.files[0].name.replace(/\.[^/.]+$/, '');
+        const selected = Array.from(fileInput.files);
+        modeRow.hidden = selected.length <= 1;
+        if (selected.length === 1 && !nameInput.value) {
+          nameInput.value = selected[0].name.replace(/\.[^/.]+$/, '');
         }
+        syncNameField();
       });
+
+      modeRow.addEventListener('change', syncNameField);
 
       root.querySelector('#upload-form').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const file = fileInput.files[0];
-        if (!file) return;
+        const selected = Array.from(fileInput.files);
+        if (!selected.length) return;
 
         const form = new FormData(event.target);
+        const mode = selected.length > 1 ? currentMode() : 'together';
+        const folderId = form.get('folderId') || null;
+        const description = form.get('description').trim();
+
         const submitBtn = root.querySelector('#upload-submit');
         const progressWrap = root.querySelector('#upload-progress');
         const progressBar = root.querySelector('#upload-progress-bar');
+        const statusEl = root.querySelector('#upload-status');
         const errorEl = root.querySelector('#upload-error');
 
         errorEl.hidden = true;
         submitBtn.disabled = true;
         progressWrap.hidden = false;
+        statusEl.hidden = false;
 
         try {
-          const safeFileName = file.name.replace(/[/\\]/g, '_');
-          const path = `users/${currentUser.uid}/files/${crypto.randomUUID()}-${safeFileName}`;
-          const fileRef = storageRef(storage, path);
-          const task = uploadBytesResumable(fileRef, file);
-
-          await new Promise((resolve, reject) => {
-            task.on(
-              'state_changed',
-              (snap) => {
-                progressBar.style.width = `${(snap.bytesTransferred / snap.totalBytes) * 100}%`;
-              },
-              reject,
-              resolve
-            );
-          });
-
-          const downloadURL = await getDownloadURL(fileRef);
-
-          await addDoc(userCollection('files'), {
-            name: form.get('name').trim(),
-            description: form.get('description').trim(),
-            folderId: form.get('folderId') || null,
-            fileName: file.name,
-            contentType: file.type,
-            size: file.size,
-            storagePath: path,
-            downloadURL,
-            createdAt: serverTimestamp()
-          });
+          if (mode === 'together') {
+            statusEl.textContent = `Uploading ${selected.length} file${selected.length === 1 ? '' : 's'}…`;
+            const pages = await uploadPages(selected, (pct) => {
+              progressBar.style.width = `${pct}%`;
+            });
+            await addDoc(userCollection('files'), {
+              name: form.get('name').trim(),
+              description,
+              folderId,
+              pages,
+              createdAt: serverTimestamp()
+            });
+          } else {
+            for (let i = 0; i < selected.length; i += 1) {
+              const file = selected[i];
+              statusEl.textContent = `Uploading ${i + 1} of ${selected.length}…`;
+              progressBar.style.width = '0%';
+              const pages = await uploadPages([file], (pct) => {
+                progressBar.style.width = `${pct}%`;
+              });
+              await addDoc(userCollection('files'), {
+                name: file.name.replace(/\.[^/.]+$/, ''),
+                description,
+                folderId,
+                pages,
+                createdAt: serverTimestamp()
+              });
+            }
+          }
 
           closeModal();
         } catch (err) {
@@ -1258,45 +1370,96 @@ function openFileEditForm(file) {
   );
 }
 
-function openFilePreview(file) {
-  let body;
-  if (file.contentType?.startsWith('image/')) {
-    body = `<img class="preview-image" src="${escapeHtml(file.downloadURL)}" alt="${escapeHtml(file.name)}" />`;
-  } else if (file.contentType === 'application/pdf') {
-    body = `<iframe class="preview-frame" src="${escapeHtml(file.downloadURL)}" title="${escapeHtml(file.name)}"></iframe>`;
-  } else {
-    body = `
-      <div class="preview-fallback">
-        <span class="material-symbols-outlined" aria-hidden="true">${fileIcon(file.contentType)}</span>
-        <p>Preview isn’t available for this file type.</p>
-      </div>
-    `;
+function previewBodyHtml(page, entryName) {
+  if (page.contentType?.startsWith('image/')) {
+    return `<img class="preview-image" src="${escapeHtml(page.downloadURL)}" alt="${escapeHtml(entryName)}" />`;
   }
+  if (page.contentType === 'application/pdf') {
+    return `<iframe class="preview-frame" src="${escapeHtml(page.downloadURL)}" title="${escapeHtml(entryName)}"></iframe>`;
+  }
+  return `
+    <div class="preview-fallback">
+      <span class="material-symbols-outlined" aria-hidden="true">${fileIcon(page.contentType)}</span>
+      <p>Preview isn’t available for this file type.</p>
+    </div>
+  `;
+}
+
+function openFilePreview(file) {
+  const pages = file.pages && file.pages.length ? file.pages : [{}];
+  let index = 0;
+
+  const pagerHtml =
+    pages.length > 1
+      ? `
+        <div class="preview-pager">
+          <button type="button" class="icon-btn" id="preview-prev-btn" aria-label="Previous page">
+            <span class="material-symbols-outlined">chevron_left</span>
+          </button>
+          <span id="preview-pager-label"></span>
+          <button type="button" class="icon-btn" id="preview-next-btn" aria-label="Next page">
+            <span class="material-symbols-outlined">chevron_right</span>
+          </button>
+        </div>
+      `
+      : '';
 
   openModal(
     `
     <h2>${escapeHtml(file.name)}</h2>
     ${file.description ? `<p class="preview-description">${escapeHtml(file.description)}</p>` : ''}
-    ${body}
+    ${pagerHtml}
+    <div id="preview-body"></div>
     <div class="preview-actions">
-      <a class="button primary" href="${escapeHtml(file.downloadURL)}" target="_blank" rel="noopener" download="${escapeHtml(file.fileName || file.name)}">Download</a>
+      <a class="button primary" id="preview-download-btn" target="_blank" rel="noopener">Download</a>
       <button class="button ghost" type="button" id="preview-close-btn">Close</button>
     </div>
   `,
     (root) => {
+      const bodyEl = root.querySelector('#preview-body');
+      const downloadBtn = root.querySelector('#preview-download-btn');
+      const pagerLabel = root.querySelector('#preview-pager-label');
+
+      function renderPage() {
+        const page = pages[index];
+        bodyEl.innerHTML = previewBodyHtml(page, file.name);
+        downloadBtn.href = page.downloadURL || '#';
+        downloadBtn.setAttribute('download', page.fileName || file.name);
+        if (pagerLabel) pagerLabel.textContent = `${index + 1} / ${pages.length}`;
+      }
+
       root.querySelector('#preview-close-btn').addEventListener('click', closeModal);
+
+      if (pages.length > 1) {
+        const prev = () => {
+          index = (index - 1 + pages.length) % pages.length;
+          renderPage();
+        };
+        const next = () => {
+          index = (index + 1) % pages.length;
+          renderPage();
+        };
+        root.querySelector('#preview-prev-btn').addEventListener('click', prev);
+        root.querySelector('#preview-next-btn').addEventListener('click', next);
+        activePager = { prev, next };
+      }
+
+      renderPage();
     },
     'modal--wide'
   );
 }
 
 async function deleteFile(file) {
-  try {
-    await deleteObject(storageRef(storage, file.storagePath));
-  } catch (err) {
-    // If the storage object is already gone, still remove the metadata below.
-    console.error(err);
-  }
+  const pages = file.pages || [];
+  await Promise.all(
+    pages.map((p) =>
+      deleteObject(storageRef(storage, p.storagePath)).catch((err) => {
+        // If the storage object is already gone, still remove the metadata below.
+        console.error(err);
+      })
+    )
+  );
   await deleteDoc(userDoc('files', file.id));
 }
 
