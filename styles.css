@@ -1,30 +1,20 @@
 :root {
   color-scheme: dark light;
   --bg: #000000;
-  --bg-elevated: #0a0a0a;
   --text: #ffffff;
   --muted: rgba(255, 255, 255, 0.62);
   --muted-strong: rgba(255, 255, 255, 0.82);
-  --violet: #8b5cf6;
-  --cyan: #22d3ee;
-  --pink: #ff4fd8;
-  --accent: var(--violet);
-  --accent-soft: rgba(139, 92, 246, 0.16);
+  --red: #ff2b2b;
+  --orange: #ff7a1a;
+  --accent: var(--red);
+  --accent-soft: rgba(255, 43, 43, 0.16);
   --border: rgba(255, 255, 255, 0.12);
-  --aurora: linear-gradient(115deg, var(--violet), var(--cyan) 48%, var(--pink) 96%);
   --card-bg: rgba(255, 255, 255, 0.04);
   --header-bg: rgba(0, 0, 0, 0.62);
   --header-bg-strong: rgba(0, 0, 0, 0.86);
   --shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
   --radius: 22px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --background-gradient: radial-gradient(
-      circle at 15% 18%,
-      rgba(139, 92, 246, 0.16),
-      transparent 45%
-    ),
-    radial-gradient(circle at 85% 12%, rgba(34, 211, 238, 0.14), transparent 45%),
-    radial-gradient(circle at 50% 105%, rgba(255, 79, 216, 0.12), transparent 55%);
   --scroll-progress: 0;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     sans-serif;
@@ -36,12 +26,12 @@
 }
 
 ::selection {
-  background: var(--violet);
+  background: var(--red);
   color: #ffffff;
 }
 
 html {
-  scrollbar-color: var(--violet) var(--bg);
+  scrollbar-color: var(--red) var(--bg);
 }
 
 ::-webkit-scrollbar {
@@ -53,7 +43,7 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(var(--violet), var(--cyan));
+  background: var(--red);
   border-radius: 999px;
   border: 3px solid var(--bg);
 }
@@ -71,7 +61,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--background-gradient), var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-size: 17px;
   line-height: 1.6;
@@ -145,7 +135,7 @@ body.cursor-ready button {
   height: 54vw;
   top: -20vw;
   left: -16vw;
-  background: radial-gradient(circle, var(--violet), transparent 65%);
+  background: radial-gradient(circle, var(--red), transparent 65%);
   animation: driftA 26s ease-in-out infinite alternate;
 }
 
@@ -154,7 +144,7 @@ body.cursor-ready button {
   height: 48vw;
   bottom: -18vw;
   right: -14vw;
-  background: radial-gradient(circle, var(--cyan), transparent 65%);
+  background: radial-gradient(circle, var(--orange), transparent 65%);
   animation: driftB 32s ease-in-out infinite alternate;
 }
 
@@ -210,8 +200,8 @@ main,
   height: 300px;
   background: radial-gradient(
     circle,
-    rgba(139, 92, 246, 0.22),
-    rgba(34, 211, 238, 0.08) 45%,
+    rgba(255, 43, 43, 0.22),
+    rgba(255, 122, 26, 0.08) 45%,
     transparent 72%
   );
   filter: blur(6px);
@@ -255,7 +245,7 @@ body.cursor-ready .cursor-glow {
   right: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--aurora);
+  background: var(--red);
   transform: scaleX(var(--scroll-progress));
   transform-origin: left;
   opacity: 0.85;
@@ -282,7 +272,7 @@ body.cursor-ready .cursor-glow {
 
 .brand:hover,
 .brand:focus-visible {
-  color: var(--cyan);
+  color: var(--orange);
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -297,8 +287,8 @@ body.cursor-ready .cursor-glow {
   position: absolute;
   height: 34px;
   border-radius: 999px;
-  background: rgba(139, 92, 246, 0.16);
-  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: rgba(255, 43, 43, 0.16);
+  border: 1px solid rgba(255, 43, 43, 0.4);
   top: 50%;
   left: 0;
   width: 0;
@@ -430,22 +420,7 @@ section h2 {
 }
 
 .text-aurora {
-  background: var(--aurora);
-  background-size: 220% 220%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: aurora-shift 8s ease infinite;
-}
-
-@keyframes aurora-shift {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
+  color: var(--red);
 }
 
 .hero-actions {
@@ -473,11 +448,9 @@ section h2 {
 }
 
 .button.primary {
-  background: var(--aurora);
-  background-size: 220% 220%;
-  animation: aurora-shift 6s ease infinite;
-  color: #050308;
-  box-shadow: 0 20px 35px rgba(139, 92, 246, 0.28);
+  background: var(--red);
+  color: #ffffff;
+  box-shadow: 0 20px 35px rgba(255, 43, 43, 0.28);
 }
 
 .button.ghost {
@@ -487,12 +460,12 @@ section h2 {
 }
 
 .button:hover {
-  box-shadow: 0 22px 45px rgba(139, 92, 246, 0.32);
+  box-shadow: 0 22px 45px rgba(255, 43, 43, 0.32);
 }
 
 .button.ghost:hover {
-  border-color: rgba(139, 92, 246, 0.55);
-  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(255, 43, 43, 0.55);
+  background: rgba(255, 43, 43, 0.08);
 }
 
 .hero-media {
@@ -505,9 +478,7 @@ section h2 {
   aspect-ratio: 3 / 4;
   border-radius: calc(var(--radius) * 1.35);
   overflow: hidden;
-  background: var(--aurora);
-  background-size: 220% 220%;
-  animation: aurora-shift 10s ease infinite;
+  background: var(--red);
   padding: 16px;
   position: relative;
   box-shadow: var(--shadow);
@@ -548,7 +519,7 @@ section h2 {
   width: 4px;
   height: 8px;
   border-radius: 999px;
-  background: var(--cyan);
+  background: var(--orange);
   transform: translateX(-50%);
   animation: scroll-cue-bounce 1.8s ease infinite;
 }
@@ -593,7 +564,7 @@ section h2 {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(240px circle at var(--x, 50%) var(--y, 50%), rgba(139, 92, 246, 0.25), transparent 70%);
+  background: radial-gradient(240px circle at var(--x, 50%) var(--y, 50%), rgba(255, 43, 43, 0.25), transparent 70%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
@@ -601,7 +572,7 @@ section h2 {
 
 .stat:hover {
   transform: translateY(-4px);
-  border-color: rgba(139, 92, 246, 0.4);
+  border-color: rgba(255, 43, 43, 0.4);
 }
 
 .stat:hover::before {
@@ -612,10 +583,7 @@ section h2 {
   font-family: var(--font-display);
   font-size: clamp(1.7rem, 3vw, 2.3rem);
   font-weight: 700;
-  background: var(--aurora);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--red);
   position: relative;
 }
 
@@ -665,7 +633,7 @@ section h2 {
 
 .marquee__track span::after {
   content: '\2726';
-  color: var(--cyan);
+  color: var(--orange);
   font-size: 0.8rem;
 }
 
@@ -721,7 +689,7 @@ section h2 {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(240px circle at var(--x, 50%) var(--y, 50%), rgba(139, 92, 246, 0.2), transparent 70%);
+  background: radial-gradient(240px circle at var(--x, 50%) var(--y, 50%), rgba(255, 43, 43, 0.2), transparent 70%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
@@ -729,7 +697,7 @@ section h2 {
 
 .quick-facts div:hover {
   transform: translateY(-3px);
-  border-color: rgba(139, 92, 246, 0.35);
+  border-color: rgba(255, 43, 43, 0.35);
 }
 
 .quick-facts div:hover::before {
@@ -775,7 +743,7 @@ section h2 {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(260px circle at var(--x, 50%) var(--y, 50%), rgba(139, 92, 246, 0.22), transparent 70%);
+  background: radial-gradient(260px circle at var(--x, 50%) var(--y, 50%), rgba(255, 43, 43, 0.22), transparent 70%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
@@ -806,7 +774,7 @@ section h2 {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.7), rgba(34, 211, 238, 0.2));
+  background: rgba(255, 43, 43, 0.45);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -820,7 +788,7 @@ section h2 {
 }
 
 .timeline .meta {
-  color: var(--cyan);
+  color: var(--orange);
   font-size: 0.9rem;
 }
 
@@ -867,7 +835,7 @@ section h2 {
   padding: 6px 12px;
   border-radius: 999px;
   background: var(--accent-soft);
-  color: var(--cyan);
+  color: var(--orange);
   font-weight: 600;
 }
 
@@ -902,7 +870,7 @@ section h2 {
   bottom: -4px;
   width: 100%;
   height: 2px;
-  background: var(--aurora);
+  background: var(--red);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.3s ease;
@@ -936,7 +904,7 @@ section h2 {
 .footer-contact:hover,
 .footer-contact:focus-visible {
   color: var(--text);
-  border-color: rgba(139, 92, 246, 0.6);
+  border-color: rgba(255, 43, 43, 0.6);
 }
 
 /* -------------------- scroll reveal -------------------- */
@@ -1043,23 +1011,15 @@ section h2 {
 /* -------------------- light theme -------------------- */
 
 body[data-theme='light'] {
-  --bg: #ffffff;
-  --bg-elevated: #f7f7f9;
+  --bg: #f5f1e6;
   --text: #0a0a0a;
   --muted: rgba(10, 10, 10, 0.6);
   --muted-strong: rgba(10, 10, 10, 0.8);
   --card-bg: rgba(10, 10, 10, 0.03);
   --border: rgba(10, 10, 10, 0.1);
-  --header-bg: rgba(255, 255, 255, 0.68);
-  --header-bg-strong: rgba(255, 255, 255, 0.9);
+  --header-bg: rgba(245, 241, 230, 0.68);
+  --header-bg-strong: rgba(245, 241, 230, 0.92);
   --shadow: 0 14px 30px rgba(10, 10, 10, 0.08);
-  --background-gradient: radial-gradient(
-      circle at 15% 18%,
-      rgba(139, 92, 246, 0.14),
-      transparent 45%
-    ),
-    radial-gradient(circle at 85% 12%, rgba(34, 211, 238, 0.12), transparent 45%),
-    radial-gradient(circle at 50% 105%, rgba(255, 79, 216, 0.1), transparent 55%);
 }
 
 body[data-theme='light'] .skip-link {
@@ -1080,10 +1040,6 @@ body[data-theme='light'] .cursor-dot {
 body[data-theme='light'] .glow::before,
 body[data-theme='light'] .glow::after {
   opacity: 0.22;
-}
-
-body[data-theme='light'] .button.primary {
-  color: #ffffff;
 }
 
 body[data-theme='light'] .portrait-frame img {
