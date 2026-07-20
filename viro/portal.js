@@ -411,6 +411,7 @@ function renderBirthdays() {
             ${b.notes ? `<p class="entry-desc">${escapeHtml(b.notes)}</p>` : ''}
           </div>
           <div class="entry-actions">
+            <button class="icon-btn" data-edit-birthday="${b.id}" aria-label="Edit"><span class="material-symbols-outlined">edit</span></button>
             <button class="icon-btn" data-delete-birthday="${b.id}" aria-label="Delete"><span class="material-symbols-outlined">delete</span></button>
           </div>
         </article>
@@ -447,22 +448,25 @@ function renderOverviewBirthdays() {
 
 document.getElementById('birthday-search').addEventListener('input', renderBirthdays);
 
-document.getElementById('add-birthday-btn').addEventListener('click', () => {
+document.getElementById('add-birthday-btn').addEventListener('click', () => openBirthdayForm());
+
+const BIRTHDAY_RELATIONSHIPS = ['Family', 'Friend', 'Coworker', 'Other'];
+
+function openBirthdayForm(existing = null) {
   openModal(
     `
-    <h2>Add birthday</h2>
+    <h2>${existing ? 'Edit' : 'Add'} birthday</h2>
     <form id="birthday-form">
-      <label>Name<input type="text" name="name" required /></label>
-      <label>Birthday<input type="date" name="date" required /></label>
+      <label>Name<input type="text" name="name" required value="${escapeHtml(existing?.name || '')}" /></label>
+      <label>Birthday<input type="date" name="date" required value="${existing?.date || ''}" /></label>
       <label>Relationship
         <select name="relationship">
-          <option>Family</option>
-          <option>Friend</option>
-          <option>Coworker</option>
-          <option>Other</option>
+          ${BIRTHDAY_RELATIONSHIPS.map(
+            (r) => `<option ${existing?.relationship === r ? 'selected' : ''}>${r}</option>`
+          ).join('')}
         </select>
       </label>
-      <label>Notes (optional)<textarea name="notes" rows="2"></textarea></label>
+      <label>Notes (optional)<textarea name="notes" rows="2">${escapeHtml(existing?.notes || '')}</textarea></label>
       <button class="button primary" type="submit">Save</button>
     </form>
   `,
@@ -470,23 +474,34 @@ document.getElementById('add-birthday-btn').addEventListener('click', () => {
       root.querySelector('#birthday-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = new FormData(event.target);
-        await addDoc(userCollection('birthdays'), {
+        const data = {
           name: form.get('name').trim(),
           date: form.get('date'),
           relationship: form.get('relationship'),
-          notes: form.get('notes').trim(),
-          createdAt: serverTimestamp()
-        });
+          notes: form.get('notes').trim()
+        };
+        if (existing) {
+          await updateDoc(userDoc('birthdays', existing.id), data);
+        } else {
+          await addDoc(userCollection('birthdays'), { ...data, createdAt: serverTimestamp() });
+        }
         closeModal();
       });
     }
   );
-});
+}
 
 document.getElementById('birthday-list').addEventListener('click', (event) => {
-  const btn = event.target.closest('[data-delete-birthday]');
-  if (!btn) return;
-  deleteDoc(userDoc('birthdays', btn.dataset.deleteBirthday));
+  const editBtn = event.target.closest('[data-edit-birthday]');
+  if (editBtn) {
+    const item = birthdays.find((b) => b.id === editBtn.dataset.editBirthday);
+    if (item) openBirthdayForm(item);
+    return;
+  }
+  const deleteBtn = event.target.closest('[data-delete-birthday]');
+  if (deleteBtn) {
+    deleteDoc(userDoc('birthdays', deleteBtn.dataset.deleteBirthday));
+  }
 });
 
 /* ==================== to-do ==================== */
@@ -906,6 +921,7 @@ function renderContacts() {
             ${urlLinks ? `<p class="entry-desc">${urlLinks}</p>` : ''}
           </div>
           <div class="entry-actions">
+            <button class="icon-btn" data-edit-contact="${c.id}" aria-label="Edit"><span class="material-symbols-outlined">edit</span></button>
             <button class="icon-btn" data-delete-contact="${c.id}" aria-label="Delete"><span class="material-symbols-outlined">delete</span></button>
           </div>
         </article>
@@ -916,16 +932,18 @@ function renderContacts() {
 
 document.getElementById('contact-search').addEventListener('input', renderContacts);
 
-document.getElementById('add-contact-btn').addEventListener('click', () => {
+document.getElementById('add-contact-btn').addEventListener('click', () => openContactForm());
+
+function openContactForm(existing = null) {
   openModal(
     `
-    <h2>Add contact</h2>
+    <h2>${existing ? 'Edit' : 'Add'} contact</h2>
     <form id="contact-form">
-      <label>Name<input type="text" name="name" required /></label>
-      <label>Company (optional)<input type="text" name="company" /></label>
-      <label>Phone (optional)<input type="tel" name="phone" /></label>
-      <label>Email (optional)<input type="email" name="email" /></label>
-      <label>URLs (optional)<textarea name="urls" rows="2" placeholder="One per line"></textarea></label>
+      <label>Name<input type="text" name="name" required value="${escapeHtml(existing?.name || '')}" /></label>
+      <label>Company (optional)<input type="text" name="company" value="${escapeHtml(existing?.company || '')}" /></label>
+      <label>Phone (optional)<input type="tel" name="phone" value="${escapeHtml(existing?.phone || '')}" /></label>
+      <label>Email (optional)<input type="email" name="email" value="${escapeHtml(existing?.email || '')}" /></label>
+      <label>URLs (optional)<textarea name="urls" rows="2" placeholder="One per line">${escapeHtml(existing?.urls || '')}</textarea></label>
       <button class="button primary" type="submit">Save</button>
     </form>
   `,
@@ -933,24 +951,35 @@ document.getElementById('add-contact-btn').addEventListener('click', () => {
       root.querySelector('#contact-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = new FormData(event.target);
-        await addDoc(userCollection('contacts'), {
+        const data = {
           name: form.get('name').trim(),
           company: form.get('company').trim(),
           phone: form.get('phone').trim(),
           email: form.get('email').trim(),
-          urls: form.get('urls').trim(),
-          createdAt: serverTimestamp()
-        });
+          urls: form.get('urls').trim()
+        };
+        if (existing) {
+          await updateDoc(userDoc('contacts', existing.id), data);
+        } else {
+          await addDoc(userCollection('contacts'), { ...data, createdAt: serverTimestamp() });
+        }
         closeModal();
       });
     }
   );
-});
+}
 
 document.getElementById('contact-list').addEventListener('click', (event) => {
-  const btn = event.target.closest('[data-delete-contact]');
-  if (!btn) return;
-  deleteDoc(userDoc('contacts', btn.dataset.deleteContact));
+  const editBtn = event.target.closest('[data-edit-contact]');
+  if (editBtn) {
+    const item = contacts.find((c) => c.id === editBtn.dataset.editContact);
+    if (item) openContactForm(item);
+    return;
+  }
+  const deleteBtn = event.target.closest('[data-delete-contact]');
+  if (deleteBtn) {
+    deleteDoc(userDoc('contacts', deleteBtn.dataset.deleteContact));
+  }
 });
 
 /* ==================== overview: clock ==================== */
