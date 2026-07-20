@@ -7,6 +7,7 @@ const body = document.body;
 const themeToggle = document.querySelector('.theme-toggle');
 const themeIcon = themeToggle?.querySelector('.material-symbols-outlined');
 const header = document.querySelector('.site-header');
+const glow = document.querySelector('.glow');
 const THEME_STORAGE_KEY = 'aidenyue-theme-preference';
 
 const prefersReducedMotion = window.matchMedia(
@@ -42,6 +43,53 @@ function setTheme(theme) {
   themeToggle.setAttribute('aria-label', `Activate ${nextMode} mode`);
 }
 
+/* -------------------- intro loader -------------------- */
+/* Shows briefly, then slides down to reveal the page. The hero's entrance
+   animation is deliberately held back until the loader dismisses so the two
+   choreograph together instead of both firing at once behind the loader. */
+
+const loader = document.getElementById('loader');
+const LOADER_MIN_MS = prefersReducedMotion ? 0 : 500;
+const loaderStartedAt = performance.now();
+let loaderDismissed = false;
+
+function triggerHeroEntrance() {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      document.querySelectorAll('.entrance, .fade-in-up').forEach((el) => {
+        el.classList.add('is-visible');
+      });
+    });
+  });
+}
+
+function dismissLoader() {
+  if (loaderDismissed) return;
+  loaderDismissed = true;
+
+  if (!loader) {
+    triggerHeroEntrance();
+    return;
+  }
+
+  const elapsed = performance.now() - loaderStartedAt;
+  const remaining = Math.max(LOADER_MIN_MS - elapsed, 0);
+
+  window.setTimeout(() => {
+    loader.classList.add('is-exiting');
+    triggerHeroEntrance();
+    window.setTimeout(() => loader.remove(), 650);
+  }, remaining);
+}
+
+if (document.readyState === 'complete') {
+  dismissLoader();
+} else {
+  window.addEventListener('load', dismissLoader, { once: true });
+}
+// Safety net in case 'load' is held up by slow external resources (fonts, etc.)
+window.setTimeout(dismissLoader, 2000);
+
 /* -------------------- age counter -------------------- */
 
 const BIRTHDATE = new Date(2006, 8, 7);
@@ -62,69 +110,54 @@ if (ageCounter) {
   ageCounter.dataset.target = String(getAge());
 }
 
-/* -------------------- scroll header + progress -------------------- */
+/* -------------------- view counter -------------------- */
+/* Static site with no backend, so a real global counter needs a third-party
+   hit-counter API. VIEW_COUNT_OFFSET accounts for views this site already
+   had before the counter existed; the API only needs to track the delta. */
 
-let lastScrollY = window.scrollY || 0;
-let scrollRaf = null;
+const VIEW_COUNT_OFFSET = 22394;
+const VIEW_COUNT_ENDPOINT = 'https://abacus.jasoncameron.dev/hit/aidenyue.com/homepage';
+const VIEW_COUNT_CACHE_KEY = 'aidenyue-last-view-count';
+const viewCountEl = document.getElementById('view-count-value');
 
-function updateScrollUI() {
-  scrollRaf = null;
-  const currentScroll = window.scrollY || 0;
-  const maxScroll = Math.max(
-    document.documentElement.scrollHeight - window.innerHeight,
-    1
-  );
-  const progress = Math.min(Math.max(currentScroll / maxScroll, 0), 1);
-  document.documentElement.style.setProperty(
-    '--scroll-progress',
-    progress.toFixed(3)
-  );
-
-  if (header) {
-    header.classList.toggle('is-condensed', currentScroll > 40);
-  }
-
-  lastScrollY = currentScroll;
-}
-
-function onScroll() {
-  if (scrollRaf !== null) return;
-  scrollRaf = window.requestAnimationFrame(updateScrollUI);
-}
-
-window.addEventListener('scroll', onScroll, { passive: true });
-updateScrollUI();
-
-/* -------------------- entrance animation (hero-style blocks) -------------------- */
-
-window.requestAnimationFrame(() => {
-  window.requestAnimationFrame(() => {
-    document.querySelectorAll('.entrance, .fade-in-up').forEach((el) => {
-      el.classList.add('is-visible');
+if (viewCountEl) {
+  fetch(VIEW_COUNT_ENDPOINT)
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error('bad response'))))
+    .then((data) => {
+      const total = VIEW_COUNT_OFFSET + (Number(data?.value) || 0);
+      viewCountEl.textContent = total.toLocaleString('en-US');
+      window.localStorage?.setItem(VIEW_COUNT_CACHE_KEY, String(total));
+    })
+    .catch(() => {
+      const cached = window.localStorage?.getItem(VIEW_COUNT_CACHE_KEY);
+      const fallback = cached ? Number(cached) : VIEW_COUNT_OFFSET;
+      viewCountEl.textContent = fallback.toLocaleString('en-US');
     });
-  });
-});
+}
 
-/* -------------------- scroll reveal engine -------------------- */
+/* -------------------- scroll reveal engine (varied entrance directions) -------------------- */
 
 if (!prefersReducedMotion) {
   const revealGroups = [
-    '.about-content',
-    '.quick-facts > div',
-    '.timeline-item',
-    '.project-card',
-    '.section-heading'
+    { selector: '.about-content', variant: 'up' },
+    { selector: '.quick-facts > div', variant: 'up' },
+    { selector: '.timeline-item', variant: 'alternate' },
+    { selector: '.project-card', variant: 'scale' },
+    { selector: '.stat', variant: 'scale' },
+    { selector: '.section-heading', variant: 'up' }
   ];
 
   const revealTargets = [];
-  revealGroups.forEach((selector) => {
+  revealGroups.forEach(({ selector, variant }) => {
     const nodes = Array.from(document.querySelectorAll(selector));
     const byParent = new Map();
     nodes.forEach((node) => {
       const parent = node.parentElement;
       const index = byParent.get(parent) || 0;
       byParent.set(parent, index + 1);
-      node.setAttribute('data-reveal', '');
+      const resolvedVariant =
+        variant === 'alternate' ? (index % 2 === 0 ? 'left' : 'right') : variant;
+      node.setAttribute('data-reveal', resolvedVariant);
       node.style.setProperty('--reveal-index', Math.min(index, 6));
       revealTargets.push(node);
     });
@@ -197,32 +230,6 @@ function runCounter(el) {
   window.requestAnimationFrame(tick);
 }
 
-/* -------------------- interactive cards: spotlight + tilt -------------------- */
-
-if (!prefersReducedMotion && hasFinePointer) {
-  const interactiveCards = document.querySelectorAll(
-    '.project-card, .timeline-item, .quick-facts > div, .stat'
-  );
-
-  interactiveCards.forEach((card) => {
-    card.addEventListener('mousemove', (event) => {
-      const rect = card.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      card.style.setProperty('--x', `${(x / rect.width) * 100}%`);
-      card.style.setProperty('--y', `${(y / rect.height) * 100}%`);
-
-      const rotateX = ((y / rect.height) - 0.5) * -6;
-      const rotateY = ((x / rect.width) - 0.5) * 6;
-      card.style.transform = `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-4px)`;
-    });
-
-    card.addEventListener('mouseleave', () => {
-      card.style.transform = '';
-    });
-  });
-}
-
 /* -------------------- magnetic buttons -------------------- */
 
 if (!prefersReducedMotion && hasFinePointer) {
@@ -254,8 +261,8 @@ if (!prefersReducedMotion && hasFinePointer) {
 
   let pointerX = window.innerWidth / 2;
   let pointerY = window.innerHeight / 2;
-  let glowX = pointerX;
-  let glowY = pointerY;
+  let glowFollowX = pointerX;
+  let glowFollowY = pointerY;
 
   window.addEventListener(
     'mousemove',
@@ -269,10 +276,10 @@ if (!prefersReducedMotion && hasFinePointer) {
   );
 
   function renderCursorGlow() {
-    glowX += (pointerX - glowX) * 0.14;
-    glowY += (pointerY - glowY) * 0.14;
-    cursorGlow.style.left = `${glowX}px`;
-    cursorGlow.style.top = `${glowY}px`;
+    glowFollowX += (pointerX - glowFollowX) * 0.14;
+    glowFollowY += (pointerY - glowFollowY) * 0.14;
+    cursorGlow.style.left = `${glowFollowX}px`;
+    cursorGlow.style.top = `${glowFollowY}px`;
     window.requestAnimationFrame(renderCursorGlow);
   }
   window.requestAnimationFrame(renderCursorGlow);
@@ -289,24 +296,10 @@ if (!prefersReducedMotion && hasFinePointer) {
   });
 }
 
-/* -------------------- background blob parallax -------------------- */
-
-if (!prefersReducedMotion && hasFinePointer) {
-  const glow = document.querySelector('.glow');
-  if (glow) {
-    window.addEventListener(
-      'mousemove',
-      (event) => {
-        const relX = (event.clientX / window.innerWidth - 0.5) * 24;
-        const relY = (event.clientY / window.innerHeight - 0.5) * 24;
-        glow.style.transform = `translate3d(${relX}px, ${relY}px, 0)`;
-      },
-      { passive: true }
-    );
-  }
-}
-
-/* -------------------- nav indicator + active section -------------------- */
+/* -------------------- nav indicator + active section (scrollspy) -------------------- */
+/* Uses a reference line rather than IntersectionObserver ratio thresholds:
+   tall sections rarely fill 35%+ of the viewport at once, so ratio-based
+   detection could get stuck on whichever section activated first. */
 
 const sectionLinks = Array.from(
   document.querySelectorAll('.site-nav a[href^="#"]')
@@ -322,42 +315,34 @@ sectionLinks.forEach((link) => {
   sectionMap.set(section, link);
 });
 
+const sections = Array.from(sectionMap.keys());
 const navIndicator = setupNavIndicator();
+let activeLink = null;
 
-if (sectionMap.size) {
-  let activeLink = null;
-  const sections = Array.from(sectionMap.keys());
+function activateLink(nextLink) {
+  if (!nextLink || nextLink === activeLink) return;
+  if (activeLink) {
+    activeLink.removeAttribute('aria-current');
+  }
+  activeLink = nextLink;
+  activeLink.setAttribute('aria-current', 'section');
+  moveNavIndicator(activeLink);
+}
 
-  const activateLink = (nextLink) => {
-    if (!nextLink || nextLink === activeLink) return;
-    if (activeLink) {
-      activeLink.removeAttribute('aria-current');
+function updateActiveSection() {
+  if (!sections.length) return;
+  const referenceY = window.innerHeight * 0.35;
+  let current = sections[0];
+  for (const section of sections) {
+    if (section.getBoundingClientRect().top <= referenceY) {
+      current = section;
     }
-    activeLink = nextLink;
-    activeLink.setAttribute('aria-current', 'section');
-    moveNavIndicator(activeLink);
-  };
+  }
+  activateLink(sectionMap.get(current));
+}
 
+if (sections.length) {
   activateLink(sectionMap.get(sections[0]));
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-
-      if (!visible.length) return;
-
-      const candidate = sectionMap.get(visible[0].target);
-      activateLink(candidate);
-    },
-    {
-      rootMargin: '-45% 0px -40% 0px',
-      threshold: [0.35, 0.6]
-    }
-  );
-
-  sections.forEach((section) => observer.observe(section));
 }
 
 function setupNavIndicator() {
@@ -382,4 +367,150 @@ function moveNavIndicator(link) {
   navIndicator.style.left = `${linkRect.left - navRect.left}px`;
   navIndicator.style.width = `${linkRect.width}px`;
   navIndicator.style.opacity = '1';
+}
+
+/* -------------------- scroll-linked motion: parallax + tilt + background drift -------------------- */
+/* Cards/headings drift continuously as the page scrolls (not just a one-time
+   fade-in), and cards additionally tilt/spotlight on mouse hover. Both write
+   into a shared per-element state so the transforms compose instead of
+   clobbering each other. Tilt is reset every scroll frame so a stationary
+   cursor riding over a card that scrolls out from under it (no mouseleave
+   ever fires) can't leave the card stuck at a stale angle. */
+
+const motionEls = Array.from(
+  document.querySelectorAll('.timeline-item, .project-card, .stat, .quick-facts > div')
+);
+const headingEls = Array.from(document.querySelectorAll('section h2, .hero-name'));
+
+const motionState = new Map();
+motionEls.forEach((el, index) => {
+  motionState.set(el, {
+    speed: 0.045 + (index % 3) * 0.02,
+    tiltX: 0,
+    tiltY: 0,
+    parallax: 0
+  });
+});
+
+function applyMotion(el) {
+  const state = motionState.get(el);
+  if (!state) return;
+  el.style.transform = `translateY(${state.parallax.toFixed(2)}px) perspective(900px) rotateX(${state.tiltX.toFixed(2)}deg) rotateY(${state.tiltY.toFixed(2)}deg)`;
+}
+
+let motionRaf = null;
+
+function updateScrollMotion() {
+  motionRaf = null;
+  const currentScroll = window.scrollY || 0;
+  const viewportHeight = window.innerHeight;
+  const maxScroll = Math.max(document.documentElement.scrollHeight - viewportHeight, 1);
+  const progress = Math.min(Math.max(currentScroll / maxScroll, 0), 1);
+
+  document.documentElement.style.setProperty('--scroll-progress', progress.toFixed(3));
+
+  if (header) {
+    header.classList.toggle('is-condensed', currentScroll > 40);
+  }
+
+  if (glow && !hasFinePointer) {
+    glow.style.transform = `translate3d(0, ${(currentScroll * -0.06).toFixed(2)}px, 0)`;
+  } else if (glow) {
+    glow.dataset.scrollY = String(currentScroll * -0.06);
+    applyGlowTransform();
+  }
+
+  if (!prefersReducedMotion) {
+    const viewportCenter = viewportHeight / 2;
+    const mobileScale = viewportHeight < 700 || window.innerWidth < 640 ? 0.55 : 1;
+
+    motionEls.forEach((el) => {
+      if (el.hasAttribute('data-reveal') && !el.classList.contains('is-visible')) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < -300 || rect.top > viewportHeight + 300) return;
+      const state = motionState.get(el);
+      const distance = rect.top + rect.height / 2 - viewportCenter;
+      state.parallax = distance * -state.speed * mobileScale;
+      // Reset tilt every frame: prevents a stale rotation sticking around
+      // when the card scrolls out from under a cursor that never moved.
+      state.tiltX = 0;
+      state.tiltY = 0;
+      applyMotion(el);
+    });
+
+    headingEls.forEach((el, index) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < -300 || rect.top > viewportHeight + 300) return;
+      const distance = rect.top + rect.height / 2 - viewportCenter;
+      const speed = (0.05 + (index % 2) * 0.015) * mobileScale;
+      el.style.transform = `translateY(${(distance * -speed).toFixed(2)}px)`;
+    });
+  }
+
+  updateActiveSection();
+}
+
+function onScroll() {
+  if (motionRaf !== null) return;
+  motionRaf = window.requestAnimationFrame(updateScrollMotion);
+}
+
+window.addEventListener('scroll', onScroll, { passive: true });
+updateScrollMotion();
+
+/* Tilt + spotlight (mouse-driven, desktop only) shares the same state map.
+   Since updateScrollMotion() zeroes tilt every scroll frame, hover-driven
+   tilt only "wins" while the pointer is actively moving over a settled
+   card, which is exactly the state it should reflect. */
+if (!prefersReducedMotion && hasFinePointer) {
+  motionEls.forEach((el) => {
+    el.addEventListener('mousemove', (event) => {
+      const rect = el.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      el.style.setProperty('--x', `${(x / rect.width) * 100}%`);
+      el.style.setProperty('--y', `${(y / rect.height) * 100}%`);
+
+      const state = motionState.get(el);
+      state.tiltX = ((y / rect.height) - 0.5) * -6;
+      state.tiltY = ((x / rect.width) - 0.5) * 6;
+      applyMotion(el);
+    });
+
+    el.addEventListener('mouseleave', () => {
+      const state = motionState.get(el);
+      state.tiltX = 0;
+      state.tiltY = 0;
+      applyMotion(el);
+    });
+  });
+}
+
+/* Background glow blobs: combine mouse parallax with the scroll drift above */
+if (glow) {
+  glow.dataset.scrollY = '0';
+  glow.dataset.mouseX = '0';
+  glow.dataset.mouseY = '0';
+}
+
+function applyGlowTransform() {
+  if (!glow) return;
+  const mx = glow.dataset.mouseX || 0;
+  const my = glow.dataset.mouseY || 0;
+  const sy = glow.dataset.scrollY || 0;
+  glow.style.transform = `translate3d(${mx}px, ${Number(my) + Number(sy)}px, 0)`;
+}
+
+if (!prefersReducedMotion && hasFinePointer && glow) {
+  window.addEventListener(
+    'mousemove',
+    (event) => {
+      const relX = (event.clientX / window.innerWidth - 0.5) * 24;
+      const relY = (event.clientY / window.innerHeight - 0.5) * 24;
+      glow.dataset.mouseX = String(relX);
+      glow.dataset.mouseY = String(relY);
+      applyGlowTransform();
+    },
+    { passive: true }
+  );
 }
