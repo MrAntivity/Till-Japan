@@ -26,11 +26,31 @@ import {
   getDownloadURL,
   deleteObject
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js';
+import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const functions = getFunctions(app);
+const callAiAssist = httpsCallable(functions, 'aiAssist');
+
+// Wraps the aiAssist Cloud Function call with a friendlier error for the
+// (very likely, until it's deployed) case where the function doesn't exist
+// yet on this Firebase project.
+async function requestAi(task, text, context) {
+  try {
+    const { data } = await callAiAssist({ task, text, context });
+    return data?.result;
+  } catch (err) {
+    console.error('AI request failed', err);
+    throw new Error(
+      err?.code === 'functions/not-found' || err?.code === 'not-found'
+        ? 'AI isn’t set up on this project yet.'
+        : 'AI request failed. Try again.'
+    );
+  }
+}
 
 /* ==================== crypto helpers ==================== */
 /* Vault secrets (passwords, card numbers, PINs) are encrypted in the browser
@@ -137,6 +157,11 @@ let contacts = [];
 let folders = [];
 let files = [];
 let currentFolderId = '';
+let aiSearchResultIds = null;
+let noteFolders = [];
+let notes = [];
+let currentNoteFolderId = '';
+let currentNoteId = null;
 const unsubscribers = [];
 
 /* ==================== DOM refs ==================== */
@@ -278,6 +303,7 @@ function startPortal() {
   startClock();
   startWeather();
   renderFolderChips();
+  renderNoteFolderChips();
   subscribeCollections();
 }
 
@@ -445,6 +471,24 @@ function subscribeCollections() {
     onSnapshot(userCollection('files'), (snap) => {
       files = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderFiles();
+    })
+  );
+
+  unsubscribers.push(
+    onSnapshot(userCollection('noteFolders'), (snap) => {
+      noteFolders = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      renderNoteFolderChips();
+      populateNoteFolderSelect();
+      renderNotes();
+    })
+  );
+
+  unsubscribers.push(
+    onSnapshot(userCollection('notes'), (snap) => {
+      notes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderNotes();
     })
   );
 }
@@ -1151,6 +1195,11 @@ function renderFolderChips() {
 }
 
 function visibleFiles() {
+  if (aiSearchResultIds) {
+    const byId = new Map(files.map((f) => [f.id, f]));
+    return aiSearchResultIds.map((id) => byId.get(id)).filter(Boolean);
+  }
+
   const query = (document.getElementById('file-search').value || '').toLowerCase();
   return files
     .filter((f) => {
@@ -1160,6 +1209,11 @@ function visibleFiles() {
       return f.name.toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function fileUploadedLabel(f) {
+  if (!f.createdAt?.toDate) return '';
+  return f.createdAt.toDate().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function renderFiles() {
@@ -1184,6 +1238,7 @@ function renderFiles() {
           </div>
           <div class="file-card-name">${escapeHtml(f.name)}</div>
           <p class="file-card-meta">${formatBytes(totalSize(pages))}${multi ? ` · ${pages.length} pages` : ''}${f.folderId ? ` · ${escapeHtml(folderName(f.folderId))}` : ''}</p>
+          ${fileUploadedLabel(f) ? `<p class="file-card-date">Uploaded ${fileUploadedLabel(f)}</p>` : ''}
           ${f.description ? `<p class="file-card-desc">${escapeHtml(f.description)}</p>` : ''}
           <div class="file-card-actions">
             ${
@@ -1206,14 +1261,75 @@ function renderFiles() {
     .join('');
 }
 
-document.getElementById('file-search').addEventListener('input', renderFiles);
+const aiSearchBtn = document.getElementById('ai-search-btn');
+const aiSearchStatus = document.getElementById('ai-search-status');
+const fileSearchInput = document.getElementById('file-search');
+
+function clearAiSearch() {
+  if (!aiSearchResultIds) return;
+  aiSearchResultIds = null;
+  aiSearchStatus.hidden = true;
+  aiSearchBtn.classList.remove('is-active');
+}
+
+aiSearchStatus.addEventListener('click', (event) => {
+  if (event.target.closest('[data-clear-ai-search]')) {
+    clearAiSearch();
+    renderFiles();
+  }
+});
+
+fileSearchInput.addEventListener('input', () => {
+  clearAiSearch();
+  renderFiles();
+});
 
 document.getElementById('folder-chips').addEventListener('click', (event) => {
   const chip = event.target.closest('[data-folder-id]');
   if (!chip) return;
+  clearAiSearch();
   currentFolderId = chip.dataset.folderId;
   renderFolderChips();
   renderFiles();
+});
+
+aiSearchBtn.addEventListener('click', async () => {
+  const query = fileSearchInput.value.trim();
+  if (!query) {
+    aiSearchStatus.hidden = false;
+    aiSearchStatus.textContent = 'Type what you’re looking for first.';
+    return;
+  }
+
+  aiSearchStatus.hidden = false;
+  aiSearchStatus.textContent = 'Asking AI…';
+  aiSearchBtn.disabled = true;
+
+  try {
+    const compactFiles = files.map((f) => ({
+      id: f.id,
+      name: f.name,
+      description: f.description || '',
+      folder: f.folderId ? folderName(f.folderId) : '',
+      date: fileUploadedLabel(f)
+    }));
+    const result = await requestAi('smart_search', query, { files: compactFiles });
+    const ids = result?.ids || [];
+    if (!ids.length) {
+      aiSearchResultIds = null;
+      aiSearchBtn.classList.remove('is-active');
+      aiSearchStatus.textContent = 'No AI matches found.';
+    } else {
+      aiSearchResultIds = ids;
+      aiSearchBtn.classList.add('is-active');
+      aiSearchStatus.innerHTML = `AI found ${ids.length} match${ids.length === 1 ? '' : 'es'}. <button type="button" data-clear-ai-search>Clear</button>`;
+    }
+    renderFiles();
+  } catch (err) {
+    aiSearchStatus.textContent = err.message || 'AI search failed.';
+  } finally {
+    aiSearchBtn.disabled = false;
+  }
 });
 
 document.getElementById('add-folder-btn').addEventListener('click', () => {
@@ -1380,13 +1496,15 @@ function openUploadModal(initialFiles) {
             const pages = await uploadPages(selected, (pct) => {
               progressBar.style.width = `${pct}%`;
             });
-            await addDoc(userCollection('files'), {
-              name: form.get('name').trim(),
+            const name = form.get('name').trim();
+            const ref = await addDoc(userCollection('files'), {
+              name,
               description,
               folderId,
               pages,
               createdAt: serverTimestamp()
             });
+            if (!description) maybeDescribeFile(ref.id, name, pages);
           } else {
             for (let i = 0; i < selected.length; i += 1) {
               const file = selected[i];
@@ -1395,13 +1513,15 @@ function openUploadModal(initialFiles) {
               const pages = await uploadPages([file], (pct) => {
                 progressBar.style.width = `${pct}%`;
               });
-              await addDoc(userCollection('files'), {
-                name: file.name.replace(/\.[^/.]+$/, ''),
+              const name = file.name.replace(/\.[^/.]+$/, '');
+              const ref = await addDoc(userCollection('files'), {
+                name,
                 description,
                 folderId,
                 pages,
                 createdAt: serverTimestamp()
               });
+              if (!description) maybeDescribeFile(ref.id, name, pages);
             }
           }
 
@@ -1414,6 +1534,18 @@ function openUploadModal(initialFiles) {
       });
     }
   );
+}
+
+// Best-effort AI description: only runs when the user left the description
+// blank, never blocks the upload UI, and silently gives up on failure (the
+// Cloud Function isn't deployed on every checkout of this repo).
+function maybeDescribeFile(docId, name, pages) {
+  const imageUrl = pages[0]?.contentType?.startsWith('image/') ? pages[0].downloadURL : undefined;
+  requestAi('describe_file', name, imageUrl ? { imageUrl } : {})
+    .then((description) => {
+      if (description) return updateDoc(userDoc('files', docId), { description });
+    })
+    .catch(() => {});
 }
 
 document.getElementById('add-file-btn').addEventListener('click', () => openUploadModal());
@@ -1611,6 +1743,361 @@ document.getElementById('file-list').addEventListener('keydown', (event) => {
   event.preventDefault();
   const file = files.find((f) => f.id === card.dataset.previewFile);
   if (file) openFilePreview(file);
+});
+
+/* ==================== drive (notes) ==================== */
+
+const driveListView = document.getElementById('drive-list-view');
+const driveEditorView = document.getElementById('drive-editor-view');
+const editorSurface = document.getElementById('editor-surface');
+const editorTitleInput = document.getElementById('editor-title');
+const editorFolderSelect = document.getElementById('editor-folder-select');
+const editorStatus = document.getElementById('editor-status');
+
+function stripHtml(html) {
+  const div = document.createElement('div');
+  div.innerHTML = html || '';
+  return div.textContent || '';
+}
+
+function noteFolderName(folderId) {
+  const f = noteFolders.find((x) => x.id === folderId);
+  return f ? f.name : '';
+}
+
+function renderNoteFolderChips() {
+  const container = document.getElementById('note-folder-chips');
+  const chips = [
+    { id: '', name: 'All notes' },
+    { id: 'unfiled', name: 'Unfiled' },
+    ...noteFolders
+  ];
+  container.innerHTML = chips
+    .map(
+      (f) => `
+        <button type="button" class="folder-chip ${currentNoteFolderId === f.id ? 'is-active' : ''}" data-note-folder-id="${f.id}">
+          <span class="material-symbols-outlined" aria-hidden="true">${f.id ? 'folder' : 'apps'}</span>
+          ${escapeHtml(f.name)}
+        </button>
+      `
+    )
+    .join('');
+}
+
+function populateNoteFolderSelect() {
+  editorFolderSelect.innerHTML = `
+    <option value="">No folder</option>
+    ${noteFolders.map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('')}
+  `;
+}
+
+document.getElementById('note-folder-chips').addEventListener('click', (event) => {
+  const chip = event.target.closest('[data-note-folder-id]');
+  if (!chip) return;
+  currentNoteFolderId = chip.dataset.noteFolderId;
+  renderNoteFolderChips();
+  renderNotes();
+});
+
+document.getElementById('add-note-folder-btn').addEventListener('click', () => {
+  openModal(
+    `
+    <h2>New folder</h2>
+    <form id="note-folder-form">
+      <label>Folder name<input type="text" name="name" required /></label>
+      <button class="button primary" type="submit">Create</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#note-folder-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        await addDoc(userCollection('noteFolders'), {
+          name: form.get('name').trim(),
+          createdAt: serverTimestamp()
+        });
+        closeModal();
+      });
+    }
+  );
+});
+
+function visibleNotes() {
+  const query = (document.getElementById('note-search').value || '').toLowerCase();
+  return notes
+    .filter((n) => {
+      if (currentNoteFolderId === 'unfiled' && n.folderId) return false;
+      if (currentNoteFolderId && currentNoteFolderId !== 'unfiled' && n.folderId !== currentNoteFolderId) return false;
+      if (!query) return true;
+      const title = (n.title || '').toLowerCase();
+      const body = stripHtml(n.contentHtml).toLowerCase();
+      return title.includes(query) || body.includes(query);
+    })
+    .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0));
+}
+
+function renderNotes() {
+  const list = document.getElementById('note-list');
+  const items = visibleNotes();
+
+  if (!items.length) {
+    list.innerHTML = '<p class="entry-empty">No notes found.</p>';
+    return;
+  }
+
+  list.innerHTML = items
+    .map((n) => {
+      const snippet = stripHtml(n.contentHtml).trim();
+      const updated = n.updatedAt?.toDate
+        ? n.updatedAt.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : '';
+      return `
+        <article class="note-card" data-open-note="${n.id}" tabindex="0" role="button" aria-label="Open ${escapeHtml(n.title || 'Untitled note')}">
+          <div class="note-card-title">${escapeHtml(n.title || 'Untitled note')}</div>
+          <p class="note-card-snippet">${escapeHtml(snippet) || '<em>Empty note</em>'}</p>
+          <p class="note-card-meta">${updated ? `Updated ${updated}` : ''}${n.folderId ? ` · ${escapeHtml(noteFolderName(n.folderId))}` : ''}</p>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+document.getElementById('note-search').addEventListener('input', renderNotes);
+
+document.getElementById('note-list').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-open-note]');
+  if (!card) return;
+  const note = notes.find((n) => n.id === card.dataset.openNote);
+  if (note) openNoteEditor(note);
+});
+
+document.getElementById('note-list').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const card = event.target.closest('[data-open-note]');
+  if (!card) return;
+  event.preventDefault();
+  const note = notes.find((n) => n.id === card.dataset.openNote);
+  if (note) openNoteEditor(note);
+});
+
+document.getElementById('add-note-btn').addEventListener('click', async () => {
+  const ref = await addDoc(userCollection('notes'), {
+    title: '',
+    contentHtml: '',
+    folderId: currentNoteFolderId && currentNoteFolderId !== 'unfiled' ? currentNoteFolderId : null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  openNoteEditor({ id: ref.id, title: '', contentHtml: '', folderId: currentNoteFolderId });
+});
+
+function openNoteEditor(note) {
+  currentNoteId = note.id;
+  editorTitleInput.value = note.title || '';
+  editorSurface.innerHTML = note.contentHtml || '';
+  editorFolderSelect.value = note.folderId || '';
+  editorStatus.textContent = '';
+  driveListView.hidden = true;
+  driveEditorView.hidden = false;
+  editorTitleInput.focus();
+}
+
+document.getElementById('editor-back-btn').addEventListener('click', () => {
+  flushAutosave();
+  currentNoteId = null;
+  driveEditorView.hidden = true;
+  driveListView.hidden = false;
+});
+
+document.getElementById('editor-delete-btn').addEventListener('click', async () => {
+  if (!currentNoteId) return;
+  await deleteDoc(userDoc('notes', currentNoteId));
+  currentNoteId = null;
+  driveEditorView.hidden = true;
+  driveListView.hidden = false;
+});
+
+// Debounced autosave: fires ~1s after the last edit, and can be flushed
+// immediately (e.g. before navigating away) via flushAutosave().
+let autosaveTimer = null;
+function scheduleAutosave() {
+  editorStatus.textContent = 'Saving…';
+  window.clearTimeout(autosaveTimer);
+  autosaveTimer = window.setTimeout(flushAutosave, 900);
+}
+
+function flushAutosave() {
+  window.clearTimeout(autosaveTimer);
+  if (!currentNoteId) return;
+  updateDoc(userDoc('notes', currentNoteId), {
+    title: editorTitleInput.value.trim(),
+    contentHtml: editorSurface.innerHTML,
+    folderId: editorFolderSelect.value || null,
+    updatedAt: serverTimestamp()
+  })
+    .then(() => {
+      editorStatus.textContent = 'Saved';
+    })
+    .catch((err) => {
+      console.error(err);
+      editorStatus.textContent = 'Could not save.';
+    });
+}
+
+editorTitleInput.addEventListener('input', scheduleAutosave);
+editorFolderSelect.addEventListener('change', scheduleAutosave);
+editorSurface.addEventListener('input', scheduleAutosave);
+
+// Toolbar: bold/underline/lists via execCommand - still the simplest,
+// dependency-free way to drive contenteditable formatting, and every major
+// browser continues to support this exact set of commands.
+document.querySelectorAll('#editor-toolbar [data-cmd]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    editorSurface.focus();
+    document.execCommand(btn.dataset.cmd, false, null);
+    scheduleAutosave();
+  });
+});
+
+function buildSwatchGroup(containerId, command, colors) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = colors
+    .map(
+      (c) =>
+        `<button type="button" class="color-swatch" data-color="${c}" style="background:${c === 'transparent' ? 'repeating-conic-gradient(#888 0% 25%, transparent 0% 50%) 0 0 / 8px 8px' : c}" aria-label="${c}"></button>`
+    )
+    .join('');
+  container.querySelectorAll('.color-swatch').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editorSurface.focus();
+      document.execCommand(command, false, btn.dataset.color === 'transparent' ? 'inherit' : btn.dataset.color);
+      scheduleAutosave();
+    });
+  });
+}
+
+buildSwatchGroup('text-color-group', 'foreColor', ['#f6f4ff', '#ff2b2b', '#ff7a1a', '#4da6ff', '#b388ff', '#3ddc84']);
+buildSwatchGroup('highlight-color-group', 'hiliteColor', ['transparent', '#fff59d', '#ffab91', '#80d8ff', '#c5e1a5', '#e1bee7']);
+
+const fontSizeMap = { 1: '12px', 2: '14px', 3: '16px', 4: '18px', 5: '24px', 6: '32px', 7: '40px' };
+
+document.getElementById('font-size-select').addEventListener('change', (event) => {
+  editorSurface.focus();
+  document.execCommand('fontSize', false, event.target.value);
+  editorSurface.querySelectorAll('font[size]').forEach((el) => {
+    const span = document.createElement('span');
+    span.style.fontSize = fontSizeMap[el.getAttribute('size')] || '16px';
+    span.innerHTML = el.innerHTML;
+    el.replaceWith(span);
+  });
+  scheduleAutosave();
+});
+
+// Auto-format "- " / "* " into a bullet list and "1. " into a numbered
+// list as soon as the trigger space is typed, like most note apps do.
+editorSurface.addEventListener('keydown', (event) => {
+  if (event.key !== ' ') return;
+  const sel = window.getSelection();
+  if (!sel || !sel.isCollapsed || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  const before = node.textContent.slice(0, range.startOffset);
+
+  if (before === '-' || before === '*') {
+    event.preventDefault();
+    node.textContent = node.textContent.slice(range.startOffset);
+    document.execCommand('insertUnorderedList');
+    scheduleAutosave();
+    return;
+  }
+  if (before === '1.') {
+    event.preventDefault();
+    node.textContent = node.textContent.slice(range.startOffset);
+    document.execCommand('insertOrderedList');
+    scheduleAutosave();
+  }
+});
+
+// Insert image: uploads to Storage, inserts inline. Repositioning it
+// afterward is native browser behavior for images inside contenteditable -
+// no extra drag/drop code needed.
+const editorImageInput = document.getElementById('editor-image-input');
+document.getElementById('editor-insert-image-btn').addEventListener('click', () => editorImageInput.click());
+
+editorImageInput.addEventListener('change', async () => {
+  const file = editorImageInput.files[0];
+  editorImageInput.value = '';
+  if (!file || !currentNoteId) return;
+
+  editorStatus.textContent = 'Uploading image…';
+  try {
+    const safeName = file.name.replace(/[/\\]/g, '_');
+    const path = `users/${currentUser.uid}/notes/${currentNoteId}/${crypto.randomUUID()}-${safeName}`;
+    const imgRef = storageRef(storage, path);
+    await new Promise((resolve, reject) => {
+      uploadBytesResumable(imgRef, file).on('state_changed', null, reject, resolve);
+    });
+    const url = await getDownloadURL(imgRef);
+    editorSurface.focus();
+    document.execCommand('insertHTML', false, `<img src="${url}" alt="${escapeHtml(file.name)}" />`);
+    scheduleAutosave();
+  } catch (err) {
+    console.error(err);
+    editorStatus.textContent = 'Image upload failed.';
+  }
+});
+
+// AI menu
+const aiMenuBtn = document.getElementById('ai-menu-btn');
+const aiMenuDropdown = document.getElementById('ai-menu-dropdown');
+
+aiMenuBtn.addEventListener('click', () => {
+  aiMenuDropdown.hidden = !aiMenuDropdown.hidden;
+});
+
+document.addEventListener('click', (event) => {
+  if (aiMenuDropdown.hidden) return;
+  if (event.target === aiMenuBtn || aiMenuDropdown.contains(event.target)) return;
+  aiMenuDropdown.hidden = true;
+});
+
+aiMenuDropdown.querySelectorAll('[data-ai-task]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    aiMenuDropdown.hidden = true;
+    const task = btn.dataset.aiTask;
+
+    const sel = window.getSelection();
+    const hasSelection = !!sel && !sel.isCollapsed && editorSurface.contains(sel.anchorNode);
+    const sourceText = (hasSelection ? sel.toString() : editorSurface.innerText).trim();
+    if (!sourceText) return;
+
+    editorStatus.textContent = 'AI is thinking…';
+    try {
+      const result = await requestAi(task, sourceText);
+      if (!result) throw new Error('Empty AI response');
+
+      editorSurface.focus();
+      if (task === 'continue') {
+        if (hasSelection) {
+          sel.collapseToEnd();
+        } else {
+          document.execCommand('selectAll', false, null);
+          document.getSelection().collapseToEnd();
+        }
+        document.execCommand('insertText', false, ' ' + result);
+      } else if (task === 'format' && !hasSelection) {
+        editorSurface.innerHTML = result;
+      } else if (hasSelection) {
+        document.execCommand('insertText', false, result);
+      } else {
+        editorSurface.innerText = result;
+      }
+      scheduleAutosave();
+    } catch (err) {
+      editorStatus.textContent = err.message || 'AI request failed.';
+    }
+  });
 });
 
 /* ==================== overview: clock ==================== */

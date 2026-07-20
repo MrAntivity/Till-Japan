@@ -28,7 +28,7 @@
       <form id="login-form" class="login-card" autocomplete="off" novalidate>
         <p class="eyebrow">Private</p>
         <h1>Enter PIN</h1>
-        <p class="lede login-lede">This portal isn’t linked from the site. Only you should have this URL.</p>
+        <p class="lede login-lede">If you’re not Aiden, this isn’t for you — leave now. This is private.</p>
         <input
           id="pin-input"
           class="pin-field"
@@ -68,6 +68,7 @@
           <button type="button" data-tab="todos">To-Do</button>
           <button type="button" data-tab="vault">Vault</button>
           <button type="button" data-tab="files">Files</button>
+          <button type="button" data-tab="drive">Drive</button>
           <button type="button" data-tab="contacts">Contacts</button>
         </nav>
         <button class="button ghost" type="button" id="logout-btn">Log out</button>
@@ -182,13 +183,81 @@
             <h2>Files</h2>
             <div class="tab-toolbar-actions">
               <input type="search" id="file-search" placeholder="Search by name or description…" aria-label="Search files" />
+              <button class="button ghost" id="ai-search-btn" type="button" title="Ask AI to find a file">✨ Smart search</button>
               <button class="button ghost" id="add-folder-btn" type="button">+ Folder</button>
               <button class="button primary" id="add-file-btn" type="button">+ Upload</button>
             </div>
           </div>
+          <p class="ai-search-status" id="ai-search-status" hidden></p>
           <div class="folder-chips" id="folder-chips"></div>
           <div class="file-grid" id="file-list">
             <p class="entry-empty">No files yet.</p>
+          </div>
+        </section>
+
+        <!-- ---------- DRIVE ---------- -->
+        <section class="portal-tab" id="tab-drive" data-tab-panel="drive" hidden>
+          <div id="drive-list-view">
+            <div class="tab-toolbar">
+              <h2>Drive</h2>
+              <div class="tab-toolbar-actions">
+                <input type="search" id="note-search" placeholder="Search notes…" aria-label="Search notes" />
+                <button class="button ghost" id="add-note-folder-btn" type="button">+ Folder</button>
+                <button class="button primary" id="add-note-btn" type="button">+ New note</button>
+              </div>
+            </div>
+            <div class="folder-chips" id="note-folder-chips"></div>
+            <div class="note-grid" id="note-list">
+              <p class="entry-empty">No notes yet.</p>
+            </div>
+          </div>
+
+          <div id="drive-editor-view" hidden>
+            <div class="editor-header">
+              <button class="icon-btn" id="editor-back-btn" type="button" aria-label="Back to notes">
+                <span class="material-symbols-outlined">arrow_back</span>
+              </button>
+              <input type="text" id="editor-title" placeholder="Untitled note" aria-label="Note title" />
+              <select id="editor-folder-select" aria-label="Note folder"></select>
+              <button class="icon-btn" id="editor-delete-btn" type="button" aria-label="Delete note">
+                <span class="material-symbols-outlined">delete</span>
+              </button>
+            </div>
+
+            <div class="editor-toolbar" id="editor-toolbar">
+              <button type="button" data-cmd="bold" title="Bold"><span class="material-symbols-outlined">format_bold</span></button>
+              <button type="button" data-cmd="underline" title="Underline"><span class="material-symbols-outlined">format_underlined</span></button>
+              <span class="toolbar-divider"></span>
+              <button type="button" data-cmd="insertUnorderedList" title="Bullet list"><span class="material-symbols-outlined">format_list_bulleted</span></button>
+              <button type="button" data-cmd="insertOrderedList" title="Numbered list"><span class="material-symbols-outlined">format_list_numbered</span></button>
+              <span class="toolbar-divider"></span>
+              <span class="toolbar-label">Color</span>
+              <div class="color-swatch-group" id="text-color-group"></div>
+              <span class="toolbar-label">Highlight</span>
+              <div class="color-swatch-group" id="highlight-color-group"></div>
+              <select id="font-size-select" title="Text size" aria-label="Text size">
+                <option value="2">Small</option>
+                <option value="3" selected>Normal</option>
+                <option value="5">Large</option>
+                <option value="7">Huge</option>
+              </select>
+              <span class="toolbar-divider"></span>
+              <button type="button" id="editor-insert-image-btn" title="Insert image"><span class="material-symbols-outlined">image</span></button>
+              <input type="file" id="editor-image-input" accept="image/*" hidden />
+              <span class="toolbar-divider"></span>
+              <div class="ai-menu">
+                <button type="button" class="button ghost small" id="ai-menu-btn">✨ AI</button>
+                <div class="ai-menu-dropdown" id="ai-menu-dropdown" hidden>
+                  <button type="button" data-ai-task="continue">Continue writing</button>
+                  <button type="button" data-ai-task="improve">Make it sound better</button>
+                  <button type="button" data-ai-task="grammar">Fix grammar</button>
+                  <button type="button" data-ai-task="format">Format better</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="editor-surface" id="editor-surface" contenteditable="true" spellcheck="true"></div>
+            <p class="editor-status" id="editor-status"></p>
           </div>
         </section>
 

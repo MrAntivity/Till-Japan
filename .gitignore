@@ -1,0 +1,12 @@
+# Firebase Cloud Functions
+functions/node_modules/
+functions/.env
+functions/.env.*
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+
+# Never commit real secrets
+*.key
+.env
+.env.local

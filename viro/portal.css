@@ -887,6 +887,294 @@ body[data-portal='true'] {
   font-size: 1.2rem;
 }
 
+/* -------------------- files: AI search -------------------- */
+
+#ai-search-btn.is-active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.ai-search-status {
+  margin: -14px 0 24px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-search-status button {
+  border: none;
+  background: none;
+  color: var(--red);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.file-card-date {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* -------------------- drive: note grid -------------------- */
+
+.note-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  min-height: 140px;
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.note-card:hover,
+.note-card:focus-visible {
+  border-color: rgba(176, 176, 176, 0.45);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.note-card-title {
+  font-weight: 600;
+  font-family: var(--font-display);
+}
+
+.note-card-snippet {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.note-card-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* -------------------- drive: editor -------------------- */
+
+#drive-editor-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.editor-header #editor-title {
+  flex: 1;
+  min-width: 160px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.editor-header #editor-title:focus {
+  outline: none;
+  border-color: rgba(176, 176, 176, 0.6);
+}
+
+.editor-header select {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  position: relative;
+}
+
+.editor-toolbar button[data-cmd],
+.editor-toolbar #editor-insert-image-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.editor-toolbar button[data-cmd]:hover,
+.editor-toolbar #editor-insert-image-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.editor-toolbar .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.toolbar-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.color-swatch-group {
+  display: flex;
+  gap: 6px;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+#font-size-select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.ai-menu {
+  position: relative;
+}
+
+.ai-menu .button.small {
+  width: auto;
+}
+
+.ai-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--card-bg);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.ai-menu-dropdown button {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.ai-menu-dropdown button:hover {
+  background: rgba(176, 176, 176, 0.14);
+}
+
+.editor-surface {
+  min-height: 50vh;
+  padding: 28px;
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 1rem;
+}
+
+.editor-surface:focus {
+  outline: none;
+  border-color: rgba(176, 176, 176, 0.45);
+}
+
+.editor-surface img,
+.note-image {
+  max-width: 100%;
+  border-radius: 10px;
+  margin: 8px 0;
+  cursor: grab;
+}
+
+.editor-surface ul,
+.editor-surface ol {
+  padding-left: 24px;
+}
+
+.editor-surface p {
+  margin: 0 0 12px;
+}
+
+.editor-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: right;
+  min-height: 1.2em;
+}
+
 /* -------------------- responsive -------------------- */
 
 @media (max-width: 720px) {
