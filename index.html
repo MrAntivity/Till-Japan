@@ -14,7 +14,7 @@
     />
     <meta name="author" content="Aiden Yue" />
     <meta name="robots" content="index,follow" />
-    <meta name="theme-color" content="#05030a" />
+    <meta name="theme-color" content="#000000" />
     <link rel="canonical" href="https://aidenyue.com/" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:type" content="website" />
@@ -42,7 +42,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
     <link
@@ -52,22 +52,15 @@
     <link rel="stylesheet" href="styles.css" />
     <link rel="icon" type="image/svg+xml" href="assets/avatar.svg" />
   </head>
-  <body data-page="home">
+  <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="glow"></div>
     <header class="site-header">
-      <div class="brand">
-        <span class="logo">AY</span>
-        <span class="name">Aiden Yue</span>
-      </div>
+      <a class="brand" href="#top">Home</a>
       <nav class="site-nav" aria-label="Primary">
-        <a href="index.html#about">About</a>
-        <a href="index.html#experience">Experience</a>
-        <a href="index.html#projects">Projects</a>
-        <a href="index.html#skills">Skills</a>
-        <a href="index.html#faq">FAQ</a>
-        <a href="blog.html">Blog</a>
-        <a href="index.html#contact">Contact</a>
+        <a href="#about">About</a>
+        <a href="#experience">Experience</a>
+        <a href="#projects">Projects</a>
       </nav>
       <button class="theme-toggle" type="button" aria-label="Activate light mode">
         <span class="material-symbols-outlined" aria-hidden="true">dark_mode</span>
@@ -76,17 +69,10 @@
 
     <main id="main-content">
       <section class="hero" id="top">
-        <div class="hero-copy">
-          <p class="eyebrow">Portfolio</p>
-          <h1>Advancing cardiology research with entrepreneurial drive.</h1>
-          <p class="lede">
-            I’m <strong>Aiden Yue</strong>, a Boston University biology student and
-            founder dedicated to improving healthcare through scientific
-            innovation while scaling design-forward e-commerce ventures.
-            Before turning 18, I guided Asynq Designs past a quarter-million
-            dollars in revenue—proof that design rigor and community empathy can
-            grow into world-class outcomes.
-          </p>
+        <div class="hero-copy entrance">
+          <h1 class="hero-name">
+            AIDEN <span class="text-aurora">YUE</span>
+          </h1>
           <div class="hero-actions">
             <a class="button primary" href="#projects">View projects</a>
             <a
@@ -99,12 +85,60 @@
             </a>
           </div>
         </div>
-        <div class="hero-media" aria-hidden="true">
+        <div class="hero-media fade-in-up" aria-hidden="true">
           <div class="portrait-frame">
             <img src="assets/portrait.svg" alt="Portrait of Aiden Yue" />
           </div>
         </div>
       </section>
+
+      <a class="scroll-cue" href="#stats" aria-label="Scroll to explore">
+        <span></span>
+      </a>
+
+      <section class="stat-strip" id="stats" aria-label="Key figures">
+        <div class="stat" data-reveal>
+          <p class="stat-value">
+            <span data-counter data-target="250" data-prefix="$" data-suffix="K+">$0K+</span>
+          </p>
+          <p class="stat-label">Revenue scaled at Asynq Designs</p>
+        </div>
+        <div class="stat" data-reveal>
+          <p class="stat-value">
+            <span data-counter data-target="5000" data-suffix="+">0+</span>
+          </p>
+          <p class="stat-label">Global orders shipped</p>
+        </div>
+        <div class="stat" data-reveal>
+          <p class="stat-value">
+            <span data-counter data-target="3.9" data-decimals="1">0.0</span>
+          </p>
+          <p class="stat-label">GPA · Dean’s List honors</p>
+        </div>
+        <div class="stat" data-reveal>
+          <p class="stat-value">
+            <span id="age-counter" data-counter data-suffix="">0</span>
+          </p>
+          <p class="stat-label">Years old</p>
+        </div>
+      </section>
+
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee__track">
+          <span>Cardiology Research</span>
+          <span>E-Commerce Growth</span>
+          <span>Design Systems</span>
+          <span>Venture Building</span>
+          <span>Data-Driven Marketing</span>
+          <span>Healthcare Innovation</span>
+          <span>Cardiology Research</span>
+          <span>E-Commerce Growth</span>
+          <span>Design Systems</span>
+          <span>Venture Building</span>
+          <span>Data-Driven Marketing</span>
+          <span>Healthcare Innovation</span>
+        </div>
+      </div>
 
       <section class="about" id="about">
         <h2>About</h2>
@@ -143,10 +177,6 @@
           <div>
             <dt>Education</dt>
             <dd>B.S. Biology, Boston University (Class of 2028)</dd>
-          </div>
-          <div>
-            <dt>Pronouns</dt>
-            <dd>He/Him</dd>
           </div>
         </dl>
       </section>
@@ -281,116 +311,12 @@
           </article>
         </div>
       </section>
-
-      <section class="skills" id="skills">
-        <h2>Skills & Tools</h2>
-        <div class="skills-content">
-          <div>
-            <h3>Core competencies</h3>
-            <ul>
-              <li>Start-up leadership &amp; venture incubation</li>
-              <li>Cardiovascular research &amp; lab operations</li>
-              <li>Data-driven marketing strategy</li>
-              <li>Project management &amp; stakeholder alignment</li>
-            </ul>
-          </div>
-          <div>
-            <h3>Technical toolkit</h3>
-            <ul>
-              <li>Adobe Illustrator &amp; Adobe Photoshop</li>
-              <li>Shopify, Klaviyo, Google Analytics, Meta Ads</li>
-              <li>Notion, Airtable, CRM &amp; fulfillment automations</li>
-            </ul>
-          </div>
-          <div>
-            <h3>Highlights</h3>
-            <ul>
-              <li>Dean’s List, University of California (Apr 2025)</li>
-              <li>International Baccalaureate Diploma (Jul 2024)</li>
-              <li>Scaled Asynq Designs beyond $250K in global revenue prior to age 18</li>
-              <li>Launched Asynq Ventures to mentor founders on design-first growth</li>
-              <li>Bilingual in Chinese and English with a multicultural client network</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section class="faq" id="faq" aria-labelledby="faq-heading">
-        <div class="section-heading">
-          <h2 id="faq-heading">Frequently asked questions</h2>
-          <p>
-            Transparent answers about cardiology research focus areas, venture
-            partnerships, and how to collaborate with Aiden Yue on healthcare
-            innovation initiatives.
-          </p>
-        </div>
-        <div class="faq-grid">
-          <article class="faq-item">
-            <h3>What areas of cardiology research does Aiden focus on?</h3>
-            <p>
-              I concentrate on nicotine’s impact on cardiovascular disease,
-              translational medicine, and how diagnostic design can improve
-              patient outcomes—insights shaped by lab work at Huntington Medical
-              Research Institutes and Boston University coursework.
-            </p>
-          </article>
-          <article class="faq-item">
-            <h3>How can founders collaborate with Aiden Yue?</h3>
-            <p>
-              Founders partner with me through Asynq Ventures for data-backed
-              growth strategies, customer journey design, and global go-to-market
-              execution that translates complex healthcare and wellness products
-              into trusted digital experiences.
-            </p>
-          </article>
-          <article class="faq-item">
-            <h3>Is Aiden available for research assistant roles?</h3>
-            <p>
-              Yes—I'm actively seeking cardiology and healthcare innovation roles
-              where I can apply wet lab technique, qualitative field research,
-              and operational rigor to support clinicians, principal
-              investigators, and translational medicine teams.
-            </p>
-          </article>
-        </div>
-      </section>
-
-      <section class="contact" id="contact">
-        <div class="contact-card">
-          <h2>Let’s collaborate</h2>
-          <p>
-            Open to research assistant roles, venture collaborations, and
-            conversations at the intersection of healthcare innovation and
-            entrepreneurship.
-          </p>
-          <div class="contact-grid">
-            <a class="contact-link" href="mailto:aidenyue2006@gmail.com">
-              <span class="material-symbols-outlined">mail</span>
-              aidenyue2006@gmail.com
-            </a>
-            <a class="contact-link" href="mailto:aidenyue@bu.edu">
-              <span class="material-symbols-outlined">school</span>
-              aidenyue@bu.edu
-            </a>
-            <a
-              class="contact-link contact-link--icon-only"
-              href="https://www.linkedin.com/in/aidenyue/"
-              target="_blank"
-              rel="noopener"
-              aria-label="Visit my LinkedIn profile"
-            >
-              <span class="material-symbols-outlined" aria-hidden="true">groups</span>
-              <span class="sr-only">LinkedIn</span>
-            </a>
-          </div>
-        </div>
-      </section>
     </main>
 
     <footer class="site-footer">
       <p>
         © <span id="year"></span> Aiden Yue. Crafted with intent.
-        <a class="admin-access" href="login.html">Admin login</a>
+        <a class="footer-contact" href="mailto:aidenyue2006@gmail.com">aidenyue2006@gmail.com</a>
       </p>
     </footer>
 
@@ -411,10 +337,7 @@
             "inLanguage": "en-US",
             "potentialAction": {
               "@type": "ContactAction",
-              "target": [
-                "mailto:aidenyue2006@gmail.com",
-                "mailto:aidenyue@bu.edu"
-              ],
+              "target": "mailto:aidenyue2006@gmail.com",
               "name": "Connect with Aiden Yue"
             }
           },
@@ -439,36 +362,6 @@
               "Healthcare innovation",
               "E-commerce growth strategy",
               "Design systems"
-            ]
-          },
-          {
-            "@type": "FAQPage",
-            "@id": "https://aidenyue.com/#faq",
-            "mainEntity": [
-              {
-                "@type": "Question",
-                "name": "What areas of cardiology research does Aiden focus on?",
-                "acceptedAnswer": {
-                  "@type": "Answer",
-                  "text": "Aiden concentrates on nicotine’s impact on cardiovascular disease, translational medicine, and diagnostic design improvements informed by work with Huntington Medical Research Institutes and Boston University."
-                }
-              },
-              {
-                "@type": "Question",
-                "name": "How can founders collaborate with Aiden Yue?",
-                "acceptedAnswer": {
-                  "@type": "Answer",
-                  "text": "Founders collaborate through Asynq Ventures for data-backed growth strategies, customer journey design, and go-to-market execution that supports healthcare and wellness innovations."
-                }
-              },
-              {
-                "@type": "Question",
-                "name": "Is Aiden available for research assistant roles?",
-                "acceptedAnswer": {
-                  "@type": "Answer",
-                  "text": "Aiden is actively seeking cardiology and healthcare innovation research assistant roles that leverage wet lab technique, qualitative field research, and operational rigor."
-                }
-              }
             ]
           }
         ]
