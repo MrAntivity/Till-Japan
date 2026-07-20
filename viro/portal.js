@@ -522,6 +522,9 @@ function renderTodos() {
               <button class="icon-btn" data-toggle-todo="${item.id}" data-category="${category}" aria-label="Toggle complete">
                 <span class="material-symbols-outlined">${item.completed ? 'undo' : 'check'}</span>
               </button>
+              <button class="icon-btn" data-edit-todo="${item.id}" data-category="${category}" aria-label="Edit">
+                <span class="material-symbols-outlined">edit</span>
+              </button>
               <button class="icon-btn" data-delete-todo="${item.id}" data-category="${category}" aria-label="Delete">
                 <span class="material-symbols-outlined">delete</span>
               </button>
@@ -561,42 +564,56 @@ function renderOverviewTodos() {
 }
 
 document.querySelectorAll('[data-add-todo]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const category = btn.dataset.addTodo;
-    openModal(
-      `
-      <h2>Add ${CATEGORY_LABEL[category]} to-do</h2>
-      <form id="todo-form">
-        <label>Title<input type="text" name="title" required /></label>
-        <label>Deadline (optional)<input type="date" name="deadline" /></label>
-        <label>Description (optional)<textarea name="description" rows="3"></textarea></label>
-        <button class="button primary" type="submit">Save</button>
-      </form>
-    `,
-      (root) => {
-        root.querySelector('#todo-form').addEventListener('submit', async (event) => {
-          event.preventDefault();
-          const form = new FormData(event.target);
+  btn.addEventListener('click', () => openTodoForm(btn.dataset.addTodo));
+});
+
+function openTodoForm(category, existing = null) {
+  openModal(
+    `
+    <h2>${existing ? 'Edit' : 'Add'} ${CATEGORY_LABEL[category]} to-do</h2>
+    <form id="todo-form">
+      <label>Title<input type="text" name="title" required value="${escapeHtml(existing?.title || '')}" /></label>
+      <label>Deadline (optional)<input type="date" name="deadline" value="${existing?.deadline || ''}" /></label>
+      <label>Description (optional)<textarea name="description" rows="3">${escapeHtml(existing?.description || '')}</textarea></label>
+      <button class="button primary" type="submit">Save</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#todo-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const data = {
+          title: form.get('title').trim(),
+          deadline: form.get('deadline') || null,
+          description: form.get('description').trim()
+        };
+        if (existing) {
+          await updateDoc(userDoc('todos', existing.id), data);
+        } else {
           await addDoc(userCollection('todos'), {
             category,
-            title: form.get('title').trim(),
-            deadline: form.get('deadline') || null,
-            description: form.get('description').trim(),
+            ...data,
             completed: false,
             createdAt: serverTimestamp()
           });
-          closeModal();
-        });
-      }
-    );
-  });
-});
+        }
+        closeModal();
+      });
+    }
+  );
+}
 
 document.querySelector('.todo-columns').addEventListener('click', (event) => {
   const toggleBtn = event.target.closest('[data-toggle-todo]');
   if (toggleBtn) {
     const item = todos[toggleBtn.dataset.category].find((t) => t.id === toggleBtn.dataset.toggleTodo);
     updateDoc(userDoc('todos', toggleBtn.dataset.toggleTodo), { completed: !item.completed });
+    return;
+  }
+  const editBtn = event.target.closest('[data-edit-todo]');
+  if (editBtn) {
+    const item = todos[editBtn.dataset.category].find((t) => t.id === editBtn.dataset.editTodo);
+    if (item) openTodoForm(editBtn.dataset.category, item);
     return;
   }
   const deleteBtn = event.target.closest('[data-delete-todo]');
@@ -657,6 +674,7 @@ function renderVault() {
           </div>
           <div class="entry-actions">
             <button class="icon-btn" data-reveal-vault="${v.id}" aria-label="Reveal"><span class="material-symbols-outlined">visibility</span></button>
+            <button class="icon-btn" data-edit-vault="${v.id}" aria-label="Edit"><span class="material-symbols-outlined">edit</span></button>
             <button class="icon-btn" data-delete-vault="${v.id}" aria-label="Delete"><span class="material-symbols-outlined">delete</span></button>
           </div>
         </article>
@@ -724,6 +742,18 @@ document.getElementById('vault-list').addEventListener('click', async (event) =>
     }
     return;
   }
+  const editBtn = event.target.closest('[data-edit-vault]');
+  if (editBtn) {
+    const entry = vaultEntries.find((v) => v.id === editBtn.dataset.editVault);
+    try {
+      const payload = await decryptPayload(encryptionKey, entry.iv, entry.ciphertext);
+      openVaultForm(entry.type, { id: entry.id, name: entry.name, payload });
+    } catch (err) {
+      console.error(err);
+    }
+    return;
+  }
+
   const deleteBtn = event.target.closest('[data-delete-vault]');
   if (deleteBtn) {
     revealedVaultPayloads.delete(deleteBtn.dataset.deleteVault);
@@ -797,17 +827,17 @@ function openVaultTypePicker() {
   );
 }
 
-function openVaultForm(type) {
+function openVaultForm(type, existing = null) {
   const def = VAULT_TYPES[type];
   openModal(
     `
-    <h2>Add ${def.label}</h2>
+    <h2>${existing ? 'Edit' : 'Add'} ${def.label}</h2>
     <form id="vault-form">
-      <label>Name<input type="text" name="name" required placeholder="e.g. Netflix" /></label>
+      <label>Name<input type="text" name="name" required placeholder="e.g. Netflix" value="${escapeHtml(existing?.name || '')}" /></label>
       ${def.fields
         .map(
           (f) =>
-            `<label>${f.label}<input type="${f.type}" name="${f.key}" required placeholder="${f.placeholder || ''}" /></label>`
+            `<label>${f.label}<input type="${f.type}" name="${f.key}" required placeholder="${f.placeholder || ''}" value="${escapeHtml(existing?.payload?.[f.key] || '')}" /></label>`
         )
         .join('')}
       <button class="button primary" type="submit">Save</button>
@@ -823,13 +853,18 @@ function openVaultForm(type) {
           payload[f.key] = (form.get(f.key) || '').trim();
         });
         const { iv, ciphertext } = await encryptPayload(encryptionKey, payload);
-        await addDoc(userCollection('vault'), {
-          type,
-          name,
-          iv,
-          ciphertext,
-          createdAt: serverTimestamp()
-        });
+        if (existing) {
+          revealedVaultPayloads.delete(existing.id);
+          await updateDoc(userDoc('vault', existing.id), { name, iv, ciphertext });
+        } else {
+          await addDoc(userCollection('vault'), {
+            type,
+            name,
+            iv,
+            ciphertext,
+            createdAt: serverTimestamp()
+          });
+        }
         closeModal();
       });
     }
@@ -851,20 +886,31 @@ function renderContacts() {
   }
 
   list.innerHTML = items
-    .map(
-      (c) => `
+    .map((c) => {
+      const metaParts = [c.company, c.phone, c.email].filter(Boolean);
+      const urlLinks = String(c.urls || '')
+        .split(/[\n,]+/)
+        .map((u) => u.trim())
+        .filter(Boolean)
+        .map((u) => {
+          const href = /^https?:\/\//i.test(u) ? u : `https://${u}`;
+          return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`;
+        })
+        .join(', ');
+
+      return `
         <article class="entry-card" data-id="${c.id}">
           <div class="entry-main">
             <div class="entry-title">${escapeHtml(c.name)}</div>
-            <p class="entry-meta">${escapeHtml(c.phone)}</p>
-            ${c.description ? `<p class="entry-desc">${escapeHtml(c.description)}</p>` : ''}
+            ${metaParts.length ? `<p class="entry-meta">${escapeHtml(metaParts.join(' · '))}</p>` : ''}
+            ${urlLinks ? `<p class="entry-desc">${urlLinks}</p>` : ''}
           </div>
           <div class="entry-actions">
             <button class="icon-btn" data-delete-contact="${c.id}" aria-label="Delete"><span class="material-symbols-outlined">delete</span></button>
           </div>
         </article>
-      `
-    )
+      `;
+    })
     .join('');
 }
 
@@ -876,8 +922,10 @@ document.getElementById('add-contact-btn').addEventListener('click', () => {
     <h2>Add contact</h2>
     <form id="contact-form">
       <label>Name<input type="text" name="name" required /></label>
-      <label>Phone number<input type="tel" name="phone" required /></label>
-      <label>Description (optional)<textarea name="description" rows="2"></textarea></label>
+      <label>Company (optional)<input type="text" name="company" /></label>
+      <label>Phone (optional)<input type="tel" name="phone" /></label>
+      <label>Email (optional)<input type="email" name="email" /></label>
+      <label>URLs (optional)<textarea name="urls" rows="2" placeholder="One per line"></textarea></label>
       <button class="button primary" type="submit">Save</button>
     </form>
   `,
@@ -887,8 +935,10 @@ document.getElementById('add-contact-btn').addEventListener('click', () => {
         const form = new FormData(event.target);
         await addDoc(userCollection('contacts'), {
           name: form.get('name').trim(),
+          company: form.get('company').trim(),
           phone: form.get('phone').trim(),
-          description: form.get('description').trim(),
+          email: form.get('email').trim(),
+          urls: form.get('urls').trim(),
           createdAt: serverTimestamp()
         });
         closeModal();
