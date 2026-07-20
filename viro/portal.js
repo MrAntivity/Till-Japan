@@ -237,6 +237,7 @@ logoutBtn.addEventListener('click', async () => {
   unsubscribers.length = 0;
   encryptionKey = null;
   currentUser = null;
+  vaultUnlocked = false;
   clearSessionKey();
   await signOut(auth);
   portalEl.hidden = true;
@@ -281,19 +282,65 @@ function startPortal() {
 }
 
 /* ==================== tab navigation ==================== */
+/* Vault gets an extra step-up password on top of the portal PIN + the
+   client-side encryption already protecting its contents — mainly to stop
+   casual access if the portal is left open on this device. It resets on
+   every fresh page load/login, unlike the PIN, so it doesn't just become a
+   second copy of the same "stay logged in" convenience. */
+
+const VAULT_PASSWORD = 'Aiden1loves$';
+let vaultUnlocked = false;
 
 portalNav.addEventListener('click', (event) => {
   const btn = event.target.closest('button[data-tab]');
   if (!btn) return;
-  switchTab(btn.dataset.tab);
+  requestTabSwitch(btn.dataset.tab);
 });
 
 document.addEventListener('click', (event) => {
   const link = event.target.closest('[data-goto-tab]');
   if (!link) return;
   event.preventDefault();
-  switchTab(link.dataset.gotoTab);
+  requestTabSwitch(link.dataset.gotoTab);
 });
+
+function requestTabSwitch(tabName) {
+  if (tabName === 'vault' && !vaultUnlocked) {
+    openVaultUnlockPrompt(() => switchTab('vault'));
+    return;
+  }
+  switchTab(tabName);
+}
+
+function openVaultUnlockPrompt(onSuccess) {
+  openModal(
+    `
+    <h2>Vault locked</h2>
+    <form id="vault-unlock-form">
+      <label>Password<input type="password" name="password" required autocomplete="off" /></label>
+      <p class="form-error" id="vault-unlock-error" hidden>Incorrect password.</p>
+      <button class="button primary" type="submit">Unlock</button>
+    </form>
+  `,
+    (root) => {
+      const input = root.querySelector('[name="password"]');
+      const errorEl = root.querySelector('#vault-unlock-error');
+      input.focus();
+      root.querySelector('#vault-unlock-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (input.value === VAULT_PASSWORD) {
+          vaultUnlocked = true;
+          closeModal();
+          onSuccess();
+        } else {
+          errorEl.hidden = false;
+          input.value = '';
+          input.focus();
+        }
+      });
+    }
+  );
+}
 
 function switchTab(tabName) {
   document.querySelectorAll('.portal-tab').forEach((panel) => {
@@ -944,9 +991,24 @@ function renderContacts() {
     return;
   }
 
+  function copyableField(value, label) {
+    return `
+      <span class="copyable-field">
+        ${escapeHtml(value)}
+        <button type="button" class="icon-btn icon-btn--sm" data-copy-text="${escapeHtml(value)}" aria-label="Copy ${label}">
+          <span class="material-symbols-outlined">content_copy</span>
+        </button>
+      </span>
+    `;
+  }
+
   list.innerHTML = items
     .map((c) => {
-      const metaParts = [c.company, c.phone, c.email].filter(Boolean);
+      const metaBits = [];
+      if (c.company) metaBits.push(`<span>${escapeHtml(c.company)}</span>`);
+      if (c.phone) metaBits.push(copyableField(c.phone, 'phone number'));
+      if (c.email) metaBits.push(copyableField(c.email, 'email'));
+
       const urlLinks = String(c.urls || '')
         .split(/[\n,]+/)
         .map((u) => u.trim())
@@ -961,7 +1023,7 @@ function renderContacts() {
         <article class="entry-card" data-id="${c.id}">
           <div class="entry-main">
             <div class="entry-title">${escapeHtml(c.name)}</div>
-            ${metaParts.length ? `<p class="entry-meta">${escapeHtml(metaParts.join(' · '))}</p>` : ''}
+            ${metaBits.length ? `<p class="entry-meta contact-meta">${metaBits.join('')}</p>` : ''}
             ${urlLinks ? `<p class="entry-desc">${urlLinks}</p>` : ''}
           </div>
           <div class="entry-actions">
@@ -1014,6 +1076,11 @@ function openContactForm(existing = null) {
 }
 
 document.getElementById('contact-list').addEventListener('click', (event) => {
+  const copyBtn = event.target.closest('[data-copy-text]');
+  if (copyBtn) {
+    copyToClipboard(copyBtn.dataset.copyText, copyBtn);
+    return;
+  }
   const editBtn = event.target.closest('[data-edit-contact]');
   if (editBtn) {
     const item = contacts.find((c) => c.id === editBtn.dataset.editContact);
@@ -1226,7 +1293,7 @@ async function uploadPages(fileList, onProgress) {
   return pages;
 }
 
-document.getElementById('add-file-btn').addEventListener('click', () => {
+function openUploadModal(initialFiles) {
   openModal(
     `
     <h2>Upload files</h2>
@@ -1280,6 +1347,11 @@ document.getElementById('add-file-btn').addEventListener('click', () => {
       });
 
       modeRow.addEventListener('change', syncNameField);
+
+      if (initialFiles && initialFiles.length) {
+        fileInput.files = initialFiles;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
 
       root.querySelector('#upload-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -1342,6 +1414,48 @@ document.getElementById('add-file-btn').addEventListener('click', () => {
       });
     }
   );
+}
+
+document.getElementById('add-file-btn').addEventListener('click', () => openUploadModal());
+
+// Drag a file in from anywhere in the portal (any tab) to open the upload
+// modal with it pre-attached. dragenter/dragleave fire repeatedly as the
+// cursor crosses child elements, so a counter tracks real enter/exit of the
+// whole portal rather than toggling the overlay on every bubbled event.
+const dropOverlay = document.getElementById('drop-overlay');
+let dragCounter = 0;
+
+function dragHasFiles(event) {
+  return !!event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files');
+}
+
+portalEl.addEventListener('dragenter', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragCounter += 1;
+  dropOverlay.hidden = false;
+});
+
+portalEl.addEventListener('dragover', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+});
+
+portalEl.addEventListener('dragleave', (event) => {
+  if (!dragHasFiles(event)) return;
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) dropOverlay.hidden = true;
+});
+
+portalEl.addEventListener('drop', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragCounter = 0;
+  dropOverlay.hidden = true;
+  const droppedFiles = event.dataTransfer.files;
+  if (!droppedFiles.length) return;
+  requestTabSwitch('files');
+  openUploadModal(droppedFiles);
 });
 
 function openFileEditForm(file) {

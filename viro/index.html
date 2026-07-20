@@ -54,13 +54,19 @@
 
     <!-- ===================== PORTAL SHELL ===================== -->
     <div id="portal" class="portal" hidden>
+      <div id="drop-overlay" class="drop-overlay" hidden aria-hidden="true">
+        <div class="drop-overlay-inner">
+          <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+          <p>Drop to upload</p>
+        </div>
+      </div>
       <header class="portal-header">
         <span class="brand">VIRO</span>
         <nav class="portal-nav" id="portal-nav" aria-label="Portal">
           <button type="button" class="is-active" data-tab="overview">Overview</button>
           <button type="button" data-tab="birthdays">Birthdays</button>
           <button type="button" data-tab="todos">To-Do</button>
-          <button type="button" data-tab="vault">Passwords</button>
+          <button type="button" data-tab="vault">Vault</button>
           <button type="button" data-tab="files">Files</button>
           <button type="button" data-tab="contacts">Contacts</button>
         </nav>
@@ -155,16 +161,16 @@
           </div>
         </section>
 
-        <!-- ---------- PASSWORDS / VAULT ---------- -->
+        <!-- ---------- VAULT ---------- -->
         <section class="portal-tab" id="tab-vault" data-tab-panel="vault" hidden>
           <div class="tab-toolbar">
-            <h2>Passwords</h2>
+            <h2>Vault</h2>
             <div class="tab-toolbar-actions">
               <input type="search" id="vault-search" placeholder="Search by name…" aria-label="Search saved entries" />
               <button class="button primary" id="add-vault-btn" type="button">+ Add</button>
             </div>
           </div>
-          <p class="vault-hint">Entries are end-to-end encrypted with your PIN — nothing sensitive is stored in plain text.</p>
+          <p class="vault-hint">Password protected, and entries are end-to-end encrypted with your PIN — nothing sensitive is stored in plain text.</p>
           <div class="entry-list" id="vault-list">
             <p class="entry-empty">Nothing saved yet.</p>
           </div>

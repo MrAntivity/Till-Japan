@@ -101,6 +101,7 @@ body[data-portal='true'] {
   font-size: clamp(1.6rem, 6vw, 2.6rem);
   letter-spacing: 0.08em;
   animation-duration: 0.7s;
+  text-transform: uppercase;
 }
 
 /* -------------------- portal shell -------------------- */
@@ -150,6 +151,9 @@ body[data-portal='true'] {
   padding: 8px 16px;
   border-radius: 999px;
   cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.9rem;
   transition: color 0.3s ease, background 0.3s ease;
 }
 
@@ -831,6 +835,56 @@ body[data-portal='true'] {
   font-weight: 500;
   font-family: monospace;
   letter-spacing: 0.02em;
+}
+
+/* -------------------- contacts: copyable fields -------------------- */
+
+.contact-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.copyable-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* -------------------- drag & drop -------------------- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.drop-overlay-inner {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 48px 64px;
+  border: 2px dashed rgba(176, 176, 176, 0.5);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.drop-overlay-inner .material-symbols-outlined {
+  font-size: 48px;
+  color: var(--red);
+}
+
+.drop-overlay-inner p {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
 }
 
 /* -------------------- responsive -------------------- */
