@@ -61,6 +61,7 @@
           <button type="button" data-tab="birthdays">Birthdays</button>
           <button type="button" data-tab="todos">To-Do</button>
           <button type="button" data-tab="vault">Passwords</button>
+          <button type="button" data-tab="files">Files</button>
           <button type="button" data-tab="contacts">Contacts</button>
         </nav>
         <button class="button ghost" type="button" id="logout-btn">Log out</button>
@@ -166,6 +167,22 @@
           <p class="vault-hint">Entries are end-to-end encrypted with your PIN — nothing sensitive is stored in plain text.</p>
           <div class="entry-list" id="vault-list">
             <p class="entry-empty">Nothing saved yet.</p>
+          </div>
+        </section>
+
+        <!-- ---------- FILES ---------- -->
+        <section class="portal-tab" id="tab-files" data-tab-panel="files" hidden>
+          <div class="tab-toolbar">
+            <h2>Files</h2>
+            <div class="tab-toolbar-actions">
+              <input type="search" id="file-search" placeholder="Search by name or description…" aria-label="Search files" />
+              <button class="button ghost" id="add-folder-btn" type="button">+ Folder</button>
+              <button class="button primary" id="add-file-btn" type="button">+ Upload</button>
+            </div>
+          </div>
+          <div class="folder-chips" id="folder-chips"></div>
+          <div class="file-grid" id="file-list">
+            <p class="entry-empty">No files yet.</p>
           </div>
         </section>
 

@@ -19,10 +19,18 @@ import {
   onSnapshot,
   serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject
+} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 /* ==================== crypto helpers ==================== */
 /* Vault secrets (passwords, card numbers, PINs) are encrypted in the browser
@@ -126,6 +134,9 @@ let birthdays = [];
 let todos = { school: [], personal: [], business: [] };
 let vaultEntries = [];
 let contacts = [];
+let folders = [];
+let files = [];
+let currentFolderId = '';
 const unsubscribers = [];
 
 /* ==================== DOM refs ==================== */
@@ -141,6 +152,7 @@ const greetingText = document.getElementById('greeting-text');
 const portalEl = document.getElementById('portal');
 const portalNav = document.getElementById('portal-nav');
 const logoutBtn = document.getElementById('logout-btn');
+const modalEl = document.getElementById('modal');
 const modalBackdrop = document.getElementById('modal-backdrop');
 const modalContent = document.getElementById('modal-content');
 const modalClose = document.getElementById('modal-close');
@@ -264,6 +276,7 @@ function enterPortal() {
 function startPortal() {
   startClock();
   startWeather();
+  renderFolderChips();
   subscribeCollections();
 }
 
@@ -293,7 +306,8 @@ function switchTab(tabName) {
 
 /* ==================== modal ==================== */
 
-function openModal(html, onMount) {
+function openModal(html, onMount, extraClass) {
+  modalEl.className = extraClass ? `modal ${extraClass}` : 'modal';
   modalContent.innerHTML = html;
   modalBackdrop.hidden = false;
   if (onMount) onMount(modalContent);
@@ -354,6 +368,23 @@ function subscribeCollections() {
     onSnapshot(userCollection('contacts'), (snap) => {
       contacts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderContacts();
+    })
+  );
+
+  unsubscribers.push(
+    onSnapshot(userCollection('folders'), (snap) => {
+      folders = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      renderFolderChips();
+      renderFiles();
+    })
+  );
+
+  unsubscribers.push(
+    onSnapshot(userCollection('files'), (snap) => {
+      files = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderFiles();
     })
   );
 }
@@ -980,6 +1011,329 @@ document.getElementById('contact-list').addEventListener('click', (event) => {
   if (deleteBtn) {
     deleteDoc(userDoc('contacts', deleteBtn.dataset.deleteContact));
   }
+});
+
+/* ==================== files ==================== */
+
+function folderName(folderId) {
+  const f = folders.find((x) => x.id === folderId);
+  return f ? f.name : '';
+}
+
+function fileIcon(contentType) {
+  if (contentType?.startsWith('image/')) return 'image';
+  if (contentType === 'application/pdf') return 'picture_as_pdf';
+  if (contentType?.includes('word')) return 'description';
+  if (contentType?.includes('sheet') || contentType?.includes('excel')) return 'table_chart';
+  if (contentType?.startsWith('video/')) return 'videocam';
+  if (contentType?.startsWith('audio/')) return 'audiotrack';
+  return 'insert_drive_file';
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function renderFolderChips() {
+  const container = document.getElementById('folder-chips');
+  const chips = [
+    { id: '', name: 'All files' },
+    { id: 'unfiled', name: 'Unfiled' },
+    ...folders
+  ];
+  container.innerHTML = chips
+    .map(
+      (f) => `
+        <button type="button" class="folder-chip ${currentFolderId === f.id ? 'is-active' : ''}" data-folder-id="${f.id}">
+          <span class="material-symbols-outlined" aria-hidden="true">${f.id ? 'folder' : 'apps'}</span>
+          ${escapeHtml(f.name)}
+        </button>
+      `
+    )
+    .join('');
+}
+
+function visibleFiles() {
+  const query = (document.getElementById('file-search').value || '').toLowerCase();
+  return files
+    .filter((f) => {
+      if (currentFolderId === 'unfiled' && f.folderId) return false;
+      if (currentFolderId && currentFolderId !== 'unfiled' && f.folderId !== currentFolderId) return false;
+      if (!query) return true;
+      return f.name.toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderFiles() {
+  const list = document.getElementById('file-list');
+  const items = visibleFiles();
+
+  if (!items.length) {
+    list.innerHTML = '<p class="entry-empty">No files found.</p>';
+    return;
+  }
+
+  list.innerHTML = items
+    .map(
+      (f) => `
+        <article class="file-card" data-preview-file="${f.id}" tabindex="0" role="button" aria-label="Preview ${escapeHtml(f.name)}">
+          <div class="file-card-icon"><span class="material-symbols-outlined">${fileIcon(f.contentType)}</span></div>
+          <div class="file-card-name">${escapeHtml(f.name)}</div>
+          <p class="file-card-meta">${formatBytes(f.size)}${f.folderId ? ` · ${escapeHtml(folderName(f.folderId))}` : ''}</p>
+          ${f.description ? `<p class="file-card-desc">${escapeHtml(f.description)}</p>` : ''}
+          <div class="file-card-actions">
+            <a class="icon-btn icon-btn--sm" href="${escapeHtml(f.downloadURL)}" target="_blank" rel="noopener" download="${escapeHtml(f.fileName || f.name)}" aria-label="Download">
+              <span class="material-symbols-outlined">download</span>
+            </a>
+            <button type="button" class="icon-btn icon-btn--sm" data-edit-file="${f.id}" aria-label="Edit">
+              <span class="material-symbols-outlined">edit</span>
+            </button>
+            <button type="button" class="icon-btn icon-btn--sm" data-delete-file="${f.id}" aria-label="Delete">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </div>
+        </article>
+      `
+    )
+    .join('');
+}
+
+document.getElementById('file-search').addEventListener('input', renderFiles);
+
+document.getElementById('folder-chips').addEventListener('click', (event) => {
+  const chip = event.target.closest('[data-folder-id]');
+  if (!chip) return;
+  currentFolderId = chip.dataset.folderId;
+  renderFolderChips();
+  renderFiles();
+});
+
+document.getElementById('add-folder-btn').addEventListener('click', () => {
+  openModal(
+    `
+    <h2>New folder</h2>
+    <form id="folder-form">
+      <label>Folder name<input type="text" name="name" required /></label>
+      <button class="button primary" type="submit">Create</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#folder-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        await addDoc(userCollection('folders'), {
+          name: form.get('name').trim(),
+          createdAt: serverTimestamp()
+        });
+        closeModal();
+      });
+    }
+  );
+});
+
+function folderOptionsHtml(selectedId) {
+  return `
+    <option value="" ${!selectedId ? 'selected' : ''}>No folder</option>
+    ${folders
+      .map((f) => `<option value="${f.id}" ${selectedId === f.id ? 'selected' : ''}>${escapeHtml(f.name)}</option>`)
+      .join('')}
+  `;
+}
+
+document.getElementById('add-file-btn').addEventListener('click', () => {
+  openModal(
+    `
+    <h2>Upload file</h2>
+    <form id="upload-form">
+      <label>File<input type="file" name="file" required /></label>
+      <label>Name<input type="text" name="name" required /></label>
+      <label>Description (optional)<textarea name="description" rows="2"></textarea></label>
+      <label>Folder<select name="folderId">${folderOptionsHtml('')}</select></label>
+      <div class="upload-progress" id="upload-progress" hidden>
+        <div class="upload-progress-bar" id="upload-progress-bar"></div>
+      </div>
+      <p class="form-error" id="upload-error" hidden>Upload failed. Try again.</p>
+      <button class="button primary" type="submit" id="upload-submit">Upload</button>
+    </form>
+  `,
+    (root) => {
+      const fileInput = root.querySelector('[name="file"]');
+      const nameInput = root.querySelector('[name="name"]');
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files[0] && !nameInput.value) {
+          nameInput.value = fileInput.files[0].name.replace(/\.[^/.]+$/, '');
+        }
+      });
+
+      root.querySelector('#upload-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const form = new FormData(event.target);
+        const submitBtn = root.querySelector('#upload-submit');
+        const progressWrap = root.querySelector('#upload-progress');
+        const progressBar = root.querySelector('#upload-progress-bar');
+        const errorEl = root.querySelector('#upload-error');
+
+        errorEl.hidden = true;
+        submitBtn.disabled = true;
+        progressWrap.hidden = false;
+
+        try {
+          const safeFileName = file.name.replace(/[/\\]/g, '_');
+          const path = `users/${currentUser.uid}/files/${crypto.randomUUID()}-${safeFileName}`;
+          const fileRef = storageRef(storage, path);
+          const task = uploadBytesResumable(fileRef, file);
+
+          await new Promise((resolve, reject) => {
+            task.on(
+              'state_changed',
+              (snap) => {
+                progressBar.style.width = `${(snap.bytesTransferred / snap.totalBytes) * 100}%`;
+              },
+              reject,
+              resolve
+            );
+          });
+
+          const downloadURL = await getDownloadURL(fileRef);
+
+          await addDoc(userCollection('files'), {
+            name: form.get('name').trim(),
+            description: form.get('description').trim(),
+            folderId: form.get('folderId') || null,
+            fileName: file.name,
+            contentType: file.type,
+            size: file.size,
+            storagePath: path,
+            downloadURL,
+            createdAt: serverTimestamp()
+          });
+
+          closeModal();
+        } catch (err) {
+          console.error(err);
+          errorEl.hidden = false;
+          submitBtn.disabled = false;
+        }
+      });
+    }
+  );
+});
+
+function openFileEditForm(file) {
+  openModal(
+    `
+    <h2>Edit file</h2>
+    <form id="file-edit-form">
+      <label>Name<input type="text" name="name" required value="${escapeHtml(file.name)}" /></label>
+      <label>Description (optional)<textarea name="description" rows="2">${escapeHtml(file.description || '')}</textarea></label>
+      <label>Folder<select name="folderId">${folderOptionsHtml(file.folderId)}</select></label>
+      <button class="button primary" type="submit">Save</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#file-edit-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        await updateDoc(userDoc('files', file.id), {
+          name: form.get('name').trim(),
+          description: form.get('description').trim(),
+          folderId: form.get('folderId') || null
+        });
+        closeModal();
+      });
+    }
+  );
+}
+
+function openFilePreview(file) {
+  let body;
+  if (file.contentType?.startsWith('image/')) {
+    body = `<img class="preview-image" src="${escapeHtml(file.downloadURL)}" alt="${escapeHtml(file.name)}" />`;
+  } else if (file.contentType === 'application/pdf') {
+    body = `<iframe class="preview-frame" src="${escapeHtml(file.downloadURL)}" title="${escapeHtml(file.name)}"></iframe>`;
+  } else {
+    body = `
+      <div class="preview-fallback">
+        <span class="material-symbols-outlined" aria-hidden="true">${fileIcon(file.contentType)}</span>
+        <p>Preview isn’t available for this file type.</p>
+      </div>
+    `;
+  }
+
+  openModal(
+    `
+    <h2>${escapeHtml(file.name)}</h2>
+    ${file.description ? `<p class="preview-description">${escapeHtml(file.description)}</p>` : ''}
+    ${body}
+    <div class="preview-actions">
+      <a class="button primary" href="${escapeHtml(file.downloadURL)}" target="_blank" rel="noopener" download="${escapeHtml(file.fileName || file.name)}">Download</a>
+      <button class="button ghost" type="button" id="preview-close-btn">Close</button>
+    </div>
+  `,
+    (root) => {
+      root.querySelector('#preview-close-btn').addEventListener('click', closeModal);
+    },
+    'modal--wide'
+  );
+}
+
+async function deleteFile(file) {
+  try {
+    await deleteObject(storageRef(storage, file.storagePath));
+  } catch (err) {
+    // If the storage object is already gone, still remove the metadata below.
+    console.error(err);
+  }
+  await deleteDoc(userDoc('files', file.id));
+}
+
+document.getElementById('file-list').addEventListener('click', (event) => {
+  const deleteBtn = event.target.closest('[data-delete-file]');
+  if (deleteBtn) {
+    const file = files.find((f) => f.id === deleteBtn.dataset.deleteFile);
+    if (file) deleteFile(file);
+    return;
+  }
+
+  const editBtn = event.target.closest('[data-edit-file]');
+  if (editBtn) {
+    const file = files.find((f) => f.id === editBtn.dataset.editFile);
+    if (file) openFileEditForm(file);
+    return;
+  }
+
+  if (event.target.closest('a[href]')) {
+    // Let the browser handle the download link natively.
+    return;
+  }
+
+  const card = event.target.closest('[data-preview-file]');
+  if (card) {
+    const file = files.find((f) => f.id === card.dataset.previewFile);
+    if (file) openFilePreview(file);
+  }
+});
+
+document.getElementById('file-list').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const card = event.target.closest('[data-preview-file]');
+  if (!card) return;
+  event.preventDefault();
+  const file = files.find((f) => f.id === card.dataset.previewFile);
+  if (file) openFilePreview(file);
 });
 
 /* ==================== overview: clock ==================== */
