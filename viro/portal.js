@@ -667,7 +667,20 @@ function renderVault() {
 
 document.getElementById('vault-search').addEventListener('input', renderVault);
 
+// Decrypted payloads are only kept in memory while their entry is expanded,
+// keyed by vault doc id, so the copy buttons can grab a value without
+// re-decrypting or scraping it back out of escaped HTML text.
+const revealedVaultPayloads = new Map();
+
 document.getElementById('vault-list').addEventListener('click', async (event) => {
+  const copyBtn = event.target.closest('[data-copy-vault]');
+  if (copyBtn) {
+    const payload = revealedVaultPayloads.get(copyBtn.dataset.copyVault);
+    const value = payload ? payload[copyBtn.dataset.copyKey] || '' : '';
+    copyToClipboard(value, copyBtn);
+    return;
+  }
+
   const revealBtn = event.target.closest('[data-reveal-vault]');
   if (revealBtn) {
     const id = revealBtn.dataset.revealVault;
@@ -675,15 +688,32 @@ document.getElementById('vault-list').addEventListener('click', async (event) =>
     if (!fieldsEl.hidden) {
       fieldsEl.hidden = true;
       fieldsEl.innerHTML = '';
+      revealedVaultPayloads.delete(id);
       revealBtn.querySelector('.material-symbols-outlined').textContent = 'visibility';
       return;
     }
     const entry = vaultEntries.find((v) => v.id === id);
     try {
       const payload = await decryptPayload(encryptionKey, entry.iv, entry.ciphertext);
+      revealedVaultPayloads.set(id, payload);
       const def = VAULT_TYPES[entry.type];
       fieldsEl.innerHTML = def.fields
-        .map((f) => `<div class="vault-field-row">${f.label}: <strong>${escapeHtml(payload[f.key] || '')}</strong></div>`)
+        .map(
+          (f) => `
+            <div class="vault-field-row">
+              <span>${f.label}: <strong>${escapeHtml(payload[f.key] || '')}</strong></span>
+              <button
+                type="button"
+                class="icon-btn icon-btn--sm"
+                data-copy-vault="${id}"
+                data-copy-key="${f.key}"
+                aria-label="Copy ${f.label}"
+              >
+                <span class="material-symbols-outlined">content_copy</span>
+              </button>
+            </div>
+          `
+        )
         .join('');
       fieldsEl.hidden = false;
       revealBtn.querySelector('.material-symbols-outlined').textContent = 'visibility_off';
@@ -696,9 +726,52 @@ document.getElementById('vault-list').addEventListener('click', async (event) =>
   }
   const deleteBtn = event.target.closest('[data-delete-vault]');
   if (deleteBtn) {
+    revealedVaultPayloads.delete(deleteBtn.dataset.deleteVault);
     deleteDoc(userDoc('vault', deleteBtn.dataset.deleteVault));
   }
 });
+
+async function copyToClipboard(text, btn) {
+  const icon = btn.querySelector('.material-symbols-outlined');
+  const original = icon.textContent;
+  let ok = false;
+
+  try {
+    if (!navigator.clipboard || !window.isSecureContext) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (err) {
+    // Fall back for cases the async Clipboard API refuses (e.g. the
+    // "Document is not focused" error some browsers throw on rapid clicks).
+    ok = legacyCopy(text);
+    if (!ok) console.error(err);
+  }
+
+  icon.textContent = ok ? 'check' : 'error';
+  btn.classList.toggle('icon-btn--copied', ok);
+  window.setTimeout(() => {
+    icon.textContent = original;
+    btn.classList.remove('icon-btn--copied');
+  }, 1200);
+}
+
+function legacyCopy(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  let success = false;
+  try {
+    success = document.execCommand('copy');
+  } catch (err) {
+    success = false;
+  }
+  document.body.removeChild(textarea);
+  return success;
+}
 
 document.getElementById('add-vault-btn').addEventListener('click', openVaultTypePicker);
 
