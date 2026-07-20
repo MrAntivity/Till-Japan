@@ -248,7 +248,7 @@ function enterPortal() {
   greetingLoader.hidden = false;
 
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const minWait = prefersReducedMotion ? 0 : 550;
+  const minWait = prefersReducedMotion ? 0 : 1700;
 
   window.setTimeout(() => {
     greetingLoader.classList.add('is-exiting');
