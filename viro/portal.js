@@ -4,6 +4,7 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
   signOut
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import {
@@ -49,7 +50,9 @@ async function deriveKey(pin, saltB64) {
     { name: 'PBKDF2', salt: b64ToBuf(saltB64), iterations: 150000, hash: 'SHA-256' },
     baseKey,
     { name: 'AES-GCM', length: 256 },
-    false,
+    // Extractable so it can be persisted for "stay logged in on this device"
+    // (see persistSessionKey) — the trade-off is spelled out there.
+    true,
     ['encrypt', 'decrypt']
   );
 }
@@ -81,6 +84,40 @@ async function getOrCreateSalt(uid) {
   return saltB64;
 }
 
+/* ==================== remembered session ==================== */
+/* So a refresh doesn't ask for the PIN again on this device. Firebase Auth
+   already persists its own session by default; this additionally persists
+   the derived AES key so the vault can still decrypt without re-entering
+   the PIN. Trade-off: anyone with access to this browser's local storage
+   (not just anyone who finds the URL) could extract this key and, combined
+   with the already-persisted Firebase session, read the vault — that's the
+   cost of "stay logged in on this computer." Logging out clears it. */
+
+const SESSION_KEY_STORAGE = 'viro-session-key';
+
+async function persistSessionKey(key) {
+  const raw = await crypto.subtle.exportKey('raw', key);
+  window.localStorage.setItem(SESSION_KEY_STORAGE, bufToB64(raw));
+}
+
+async function restoreSessionKey() {
+  const b64 = window.localStorage.getItem(SESSION_KEY_STORAGE);
+  if (!b64) return null;
+  try {
+    return await crypto.subtle.importKey('raw', b64ToBuf(b64), { name: 'AES-GCM' }, false, [
+      'encrypt',
+      'decrypt'
+    ]);
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+function clearSessionKey() {
+  window.localStorage.removeItem(SESSION_KEY_STORAGE);
+}
+
 /* ==================== state ==================== */
 
 let currentUser = null;
@@ -110,11 +147,14 @@ const modalClose = document.getElementById('modal-close');
 
 /* ==================== login ==================== */
 
+let manualLoginInProgress = false;
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const pin = pinInput.value.trim();
   if (!pin) return;
 
+  manualLoginInProgress = true;
   loginError.hidden = true;
   loginSubmit.disabled = true;
   loginSubmitLabel.textContent = 'Checking…';
@@ -124,6 +164,7 @@ loginForm.addEventListener('submit', async (event) => {
     const saltB64 = await getOrCreateSalt(user.uid);
     encryptionKey = await deriveKey(pin, saltB64);
     currentUser = user;
+    await persistSessionKey(encryptionKey);
     pinInput.value = '';
     enterPortal();
   } catch (err) {
@@ -132,6 +173,7 @@ loginForm.addEventListener('submit', async (event) => {
     pinInput.value = '';
     pinInput.focus();
   } finally {
+    manualLoginInProgress = false;
     loginSubmit.disabled = false;
     loginSubmitLabel.textContent = 'Unlock';
   }
@@ -151,11 +193,39 @@ async function loginWithPin(pin) {
   }
 }
 
+// Resumes an existing session on page load (e.g. after a refresh) so the PIN
+// only has to be entered once per device, until Log out is pressed. Skips
+// itself entirely while a manual PIN submit is in flight to avoid a race
+// where this fires mid-login and signs the user right back out.
+onAuthStateChanged(auth, async (user) => {
+  if (manualLoginInProgress || currentUser) return;
+
+  if (!user) {
+    loginScreen.hidden = false;
+    return;
+  }
+
+  const storedKey = await restoreSessionKey();
+  if (!storedKey) {
+    // Authenticated but we don't have the key to decrypt the vault (e.g.
+    // storage was cleared on this device) — force a clean re-login instead
+    // of leaving the portal in a half-usable state.
+    await signOut(auth);
+    loginScreen.hidden = false;
+    return;
+  }
+
+  currentUser = user;
+  encryptionKey = storedKey;
+  enterPortal();
+});
+
 logoutBtn.addEventListener('click', async () => {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers.length = 0;
   encryptionKey = null;
   currentUser = null;
+  clearSessionKey();
   await signOut(auth);
   portalEl.hidden = true;
   loginScreen.hidden = false;
