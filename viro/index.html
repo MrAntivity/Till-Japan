@@ -99,8 +99,9 @@
               <p class="overview-date" id="overview-date">—</p>
               <p class="overview-time" id="overview-time">—</p>
             </div>
-            <div class="overview-card overview-weather" id="overview-weather">
+            <div class="overview-card overview-weather" id="overview-weather" role="button" tabindex="0" aria-label="View this week's weather">
               <p class="weather-loc" id="weather-loc">Locating…</p>
+              <span class="material-symbols-outlined weather-icon" id="weather-icon" aria-hidden="true"></span>
               <p class="weather-temp" id="weather-temp">--°</p>
               <p class="weather-desc" id="weather-desc">Fetching weather…</p>
               <p class="weather-advice" id="weather-advice"></p>
@@ -263,22 +264,34 @@
               <button type="button" data-cmd="insertUnorderedList" title="Bullet list"><span class="material-symbols-outlined">format_list_bulleted</span></button>
               <button type="button" data-cmd="insertOrderedList" title="Numbered list"><span class="material-symbols-outlined">format_list_numbered</span></button>
               <span class="toolbar-divider"></span>
-              <span class="toolbar-label">Color</span>
-              <div class="color-swatch-group" id="text-color-group"></div>
-              <span class="toolbar-label">Highlight</span>
-              <div class="color-swatch-group" id="highlight-color-group"></div>
-              <select id="font-size-select" title="Text size" aria-label="Text size">
-                <option value="2">Small</option>
-                <option value="3" selected>Normal</option>
-                <option value="5">Large</option>
-                <option value="7">Huge</option>
-              </select>
+              <div class="color-picker">
+                <button type="button" id="text-color-btn" title="Text color" aria-label="Text color">
+                  <span class="material-symbols-outlined">format_color_text</span>
+                  <span class="color-picker-swatch" id="text-color-swatch"></span>
+                </button>
+                <div class="color-picker-popover" id="text-color-popover" hidden></div>
+              </div>
+              <div class="color-picker">
+                <button type="button" id="highlight-color-btn" title="Highlight color" aria-label="Highlight color">
+                  <span class="material-symbols-outlined">format_color_fill</span>
+                  <span class="color-picker-swatch" id="highlight-color-swatch"></span>
+                </button>
+                <div class="color-picker-popover" id="highlight-color-popover" hidden></div>
+              </div>
+              <input type="number" id="font-size-input" class="font-size-input" min="8" max="96" step="1" value="16" title="Text size" aria-label="Text size in pixels" />
               <span class="toolbar-divider"></span>
+              <button type="button" id="editor-link-btn" title="Insert link"><span class="material-symbols-outlined">link</span></button>
+              <button type="button" id="editor-comment-btn" title="Add comment"><span class="material-symbols-outlined">add_comment</span></button>
               <button type="button" id="editor-insert-image-btn" title="Insert image"><span class="material-symbols-outlined">image</span></button>
               <input type="file" id="editor-image-input" accept="image/*" hidden />
               <span class="toolbar-divider"></span>
+              <button type="button" id="editor-print-btn" title="Print"><span class="material-symbols-outlined">print</span></button>
+              <button type="button" id="editor-download-btn" title="Download"><span class="material-symbols-outlined">download</span></button>
+              <span class="toolbar-divider"></span>
               <div class="ai-menu">
-                <button type="button" class="button ghost small" id="ai-menu-btn">✨ AI</button>
+                <button type="button" class="icon-btn icon-btn--ai" id="ai-menu-btn" title="AI tools" aria-label="AI tools">
+                  <span class="material-symbols-outlined">auto_awesome</span>
+                </button>
                 <div class="ai-menu-dropdown" id="ai-menu-dropdown" hidden>
                   <button type="button" data-ai-task="continue">Continue writing</button>
                   <button type="button" data-ai-task="improve">Make it sound better</button>

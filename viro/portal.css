@@ -149,6 +149,12 @@ body[data-portal='true'] {
   transform: scale(0.94);
 }
 
+#logout-btn {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.9rem;
+}
+
 .portal-nav {
   display: flex;
   gap: 6px;
@@ -183,7 +189,7 @@ body[data-portal='true'] {
 .portal-main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 48px 32px 100px;
+  padding: 22px 32px 100px;
 }
 
 .portal-tab[hidden] {
@@ -345,12 +351,32 @@ body[data-portal='true'] {
   font-weight: 700;
 }
 
+.overview-weather {
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.overview-weather:hover {
+  border-color: rgba(176, 176, 176, 0.4);
+  transform: translateY(-2px);
+}
+
+.weather-icon {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  font-size: 38px;
+  color: var(--red);
+}
+
 .weather-loc {
   margin: 0 0 6px;
   color: var(--muted);
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  padding-right: 44px;
 }
 
 .weather-temp {
@@ -389,6 +415,8 @@ body[data-portal='true'] {
   margin: 0;
   font-size: 1.1rem;
   font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .overview-card-header a {
@@ -716,8 +744,7 @@ body[data-theme='light'] .icon-btn--ai.is-active {
    (inheriting our white text onto a white popup = invisible). */
 
 .modal select,
-.editor-header select,
-#font-size-select {
+.editor-header select {
   appearance: none;
   -webkit-appearance: none;
   padding: 12px 40px 12px 14px;
@@ -735,15 +762,13 @@ body[data-theme='light'] .icon-btn--ai.is-active {
 }
 
 .modal select:hover,
-.editor-header select:hover,
-#font-size-select:hover {
+.editor-header select:hover {
   border-color: rgba(176, 176, 176, 0.5);
   background-color: rgba(255, 255, 255, 0.07);
 }
 
 .modal select:focus,
-.editor-header select:focus,
-#font-size-select:focus {
+.editor-header select:focus {
   outline: none;
   border-color: rgba(176, 176, 176, 0.6);
   box-shadow: 0 0 0 4px rgba(176, 176, 176, 0.16);
@@ -755,8 +780,7 @@ select option {
 }
 
 body[data-theme='light'] .modal select,
-body[data-theme='light'] .editor-header select,
-body[data-theme='light'] #font-size-select {
+body[data-theme='light'] .editor-header select {
   background-color: rgba(10, 10, 10, 0.03);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%234a4a4a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
@@ -796,6 +820,79 @@ body[data-theme='light'] #font-size-select {
 
 body[data-theme='light'] .button.danger {
   background: #c92a2a;
+}
+
+.weather-week-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 12px;
+}
+
+.weather-week-day {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+}
+
+.weather-week-day.is-today {
+  border-color: rgba(176, 176, 176, 0.5);
+  background: rgba(176, 176, 176, 0.08);
+}
+
+.weather-week-day-name {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.weather-week-icon {
+  font-size: 34px;
+  color: var(--red);
+}
+
+.weather-week-desc {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  min-height: 1.4em;
+}
+
+.weather-week-temp {
+  margin: 4px 0 0;
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.weather-week-min {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.weather-week-rain {
+  margin: 2px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.weather-week-rain .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.weather-week-rain.is-notable {
+  color: var(--red);
 }
 
 .modal.modal--wide {
@@ -1112,6 +1209,39 @@ body[data-theme='light'] .button.danger {
   gap: 4px;
 }
 
+.contact-card-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  transition: background 0.2s ease;
+}
+
+.contact-card-main[role='button']:hover {
+  background: rgba(176, 176, 176, 0.06);
+}
+
+.contact-company {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.contact-card-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+
+.contact-card.is-expanded .contact-card-chevron {
+  transform: rotate(180deg);
+}
+
 /* -------------------- drag & drop -------------------- */
 
 .drop-overlay {
@@ -1272,8 +1402,8 @@ body[data-theme='light'] .button.danger {
   position: relative;
 }
 
-.editor-toolbar button[data-cmd],
-.editor-toolbar #editor-insert-image-btn {
+.editor-toolbar > button,
+.color-picker > button {
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -1286,8 +1416,8 @@ body[data-theme='light'] .button.danger {
   transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
-.editor-toolbar button[data-cmd]:hover,
-.editor-toolbar #editor-insert-image-btn:hover {
+.editor-toolbar > button:hover,
+.color-picker > button:hover {
   color: var(--text);
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.04);
@@ -1304,43 +1434,83 @@ body[data-theme='light'] .button.danger {
   margin: 0 4px;
 }
 
-.toolbar-label {
-  font-size: 0.75rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.color-picker {
+  position: relative;
 }
 
-.color-swatch-group {
+.color-picker-swatch {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--red);
+}
+
+.color-picker-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  padding: 8px;
+  min-width: 220px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.color-picker-option {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
 }
 
-.color-swatch {
-  width: 20px;
-  height: 20px;
+.color-picker-option:hover {
+  background: rgba(176, 176, 176, 0.1);
+}
+
+.color-picker-option-swatch {
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   border: 1px solid var(--border);
-  cursor: pointer;
-  padding: 0;
+  flex-shrink: 0;
 }
 
-.color-swatch:hover {
-  transform: scale(1.15);
-}
-
-#font-size-select {
-  padding: 8px 34px 8px 10px;
+.font-size-input {
+  width: 56px;
+  padding: 8px 6px;
   border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
   font-size: 0.85rem;
+  text-align: center;
+}
+
+.font-size-input:focus {
+  outline: none;
+  border-color: rgba(176, 176, 176, 0.6);
 }
 
 .ai-menu {
   position: relative;
-}
-
-.ai-menu .button.small {
-  width: auto;
 }
 
 .ai-menu-dropdown {
@@ -1376,14 +1546,14 @@ body[data-theme='light'] .button.danger {
 }
 
 .editor-surface {
-  min-height: 50vh;
-  padding: 28px;
+  min-height: 74vh;
+  padding: 48px clamp(20px, 8vw, 72px);
   border-radius: var(--radius);
   background: var(--card-bg);
   border: 1px solid var(--border);
   color: var(--text);
-  line-height: 1.7;
-  font-size: 1rem;
+  line-height: 1.75;
+  font-size: 1.05rem;
 }
 
 .editor-surface:focus {
@@ -1408,12 +1578,73 @@ body[data-theme='light'] .button.danger {
   margin: 0 0 12px;
 }
 
+.editor-surface a {
+  color: var(--red);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.note-comment {
+  background: rgba(255, 212, 59, 0.25);
+  border-bottom: 2px dotted #ffd43b;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
 .editor-status {
   margin: 0;
   color: var(--muted);
   font-size: 0.8rem;
   text-align: right;
   min-height: 1.2em;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #drive-editor-view,
+  #drive-editor-view * {
+    visibility: visible;
+  }
+
+  #drive-editor-view {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+
+  #editor-back-btn,
+  #editor-delete-btn,
+  #editor-folder-select,
+  .editor-toolbar,
+  .editor-status {
+    display: none !important;
+  }
+
+  #editor-title {
+    border: none;
+    background: none;
+    padding: 0 0 20px;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #000;
+  }
+
+  .editor-surface {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
+    color: #000;
+    background: #fff;
+  }
+
+  .note-comment {
+    background: none;
+    border-bottom: 1px dotted #999;
+  }
 }
 
 /* -------------------- responsive -------------------- */
@@ -1430,7 +1661,7 @@ body[data-theme='light'] .button.danger {
   }
 
   .portal-main {
-    padding: 36px 20px 80px;
+    padding: 18px 20px 80px;
   }
 
   .tab-toolbar-actions {
@@ -1453,6 +1684,19 @@ body[data-theme='light'] .button.danger {
 
   .entry-card {
     flex-direction: column;
+  }
+
+  .modal .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .weather-week-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .editor-surface {
+    padding: 28px 20px;
+    min-height: 60vh;
   }
 }
 
@@ -1732,5 +1976,15 @@ body[data-theme='light'] .calendar-event {
 
   .calendar-event-title {
     font-size: 0.72rem;
+  }
+
+  .calendar-grid-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .calendar-grid-header,
+  .calendar-grid-body {
+    min-width: 640px;
   }
 }

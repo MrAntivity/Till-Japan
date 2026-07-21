@@ -817,11 +817,22 @@ function renderOverviewTodos() {
             <div class="entry-title">${escapeHtml(item.title)} <span class="tag tag--${item.category}">${CATEGORY_LABEL[item.category]}</span></div>
             <p class="entry-meta">Due ${new Date(item.deadline + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</p>
           </div>
+          <div class="entry-actions">
+            <button class="icon-btn" data-toggle-todo="${item.id}" aria-label="Mark done">
+              <span class="material-symbols-outlined">check</span>
+            </button>
+          </div>
         </li>
       `
     )
     .join('');
 }
+
+document.getElementById('overview-todos').addEventListener('click', (event) => {
+  const toggleBtn = event.target.closest('[data-toggle-todo]');
+  if (!toggleBtn) return;
+  updateDoc(userDoc('todos', toggleBtn.dataset.toggleTodo), { completed: true });
+});
 
 document.querySelectorAll('[data-add-todo]').forEach((btn) => {
   btn.addEventListener('click', () => openTodoForm(btn.dataset.addTodo));
@@ -1139,6 +1150,8 @@ function openVaultForm(type, existing = null) {
 
 /* ==================== contacts ==================== */
 
+const expandedContactIds = new Set();
+
 function renderContacts() {
   const list = document.getElementById('contact-list');
   let items;
@@ -1183,12 +1196,32 @@ function renderContacts() {
         })
         .join(', ');
 
+      const expanded = expandedContactIds.has(c.id);
+      const hasDetails = metaBits.length > 0 || !!urlLinks;
+
       return `
-        <article class="entry-card" data-id="${c.id}">
-          <div class="entry-main">
-            <div class="entry-title">${escapeHtml(c.name)}</div>
-            ${metaBits.length ? `<p class="entry-meta contact-meta">${metaBits.join('')}</p>` : ''}
-            ${urlLinks ? `<p class="entry-desc">${urlLinks}</p>` : ''}
+        <article class="entry-card contact-card ${expanded ? 'is-expanded' : ''}" data-id="${c.id}">
+          <div
+            class="contact-card-main"
+            data-toggle-contact="${c.id}"
+            ${hasDetails ? 'role="button" tabindex="0"' : ''}
+            aria-expanded="${expanded}"
+          >
+            <div class="entry-main">
+              <div class="entry-title">
+                ${escapeHtml(c.name)}
+                ${c.company ? `<span class="entry-meta contact-company">${escapeHtml(c.company)}</span>` : ''}
+              </div>
+              ${
+                expanded
+                  ? `
+                    ${metaBits.length ? `<p class="entry-meta contact-meta">${metaBits.join('')}</p>` : ''}
+                    ${urlLinks ? `<p class="entry-desc">${urlLinks}</p>` : ''}
+                  `
+                  : ''
+              }
+            </div>
+            ${hasDetails ? '<span class="material-symbols-outlined contact-card-chevron">expand_more</span>' : ''}
           </div>
           <div class="entry-actions">
             <button class="icon-btn" data-edit-contact="${c.id}" aria-label="Edit"><span class="material-symbols-outlined">edit</span></button>
@@ -1317,7 +1350,26 @@ document.getElementById('contact-list').addEventListener('click', (event) => {
     confirmDelete(`Delete ${item ? `“${item.name}”` : 'this contact'}? This can’t be undone.`, () => {
       deleteDoc(userDoc('contacts', deleteBtn.dataset.deleteContact));
     });
+    return;
   }
+  const toggleBtn = event.target.closest('[data-toggle-contact]');
+  if (toggleBtn) {
+    const id = toggleBtn.dataset.toggleContact;
+    if (expandedContactIds.has(id)) {
+      expandedContactIds.delete(id);
+    } else {
+      expandedContactIds.add(id);
+    }
+    renderContacts();
+  }
+});
+
+document.getElementById('contact-list').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const toggleBtn = event.target.closest('[data-toggle-contact]');
+  if (!toggleBtn) return;
+  event.preventDefault();
+  toggleBtn.click();
 });
 
 /* ==================== files ==================== */
@@ -2317,34 +2369,111 @@ document.querySelectorAll('#editor-toolbar [data-cmd]').forEach((btn) => {
   });
 });
 
-function buildSwatchGroup(containerId, command, colors) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = colors
+// Notion-style: one button per picker (text color / highlight) that opens a
+// popover with a full palette, instead of a fixed row of swatches always
+// taking up toolbar space.
+const TEXT_COLOR_PALETTE = [
+  { name: 'Default', value: null, swatch: 'var(--text)' },
+  { name: 'Gray', value: '#9b9a97' },
+  { name: 'Red', value: '#ff5c5c' },
+  { name: 'Orange', value: '#ffa344' },
+  { name: 'Yellow', value: '#ffd43b' },
+  { name: 'Green', value: '#4ade80' },
+  { name: 'Blue', value: '#4da6ff' },
+  { name: 'Purple', value: '#b388ff' },
+  { name: 'Pink', value: '#ff8fd6' },
+  { name: 'Brown', value: '#c08552' }
+];
+
+const HIGHLIGHT_COLOR_PALETTE = [
+  { name: 'None', value: 'transparent', swatch: 'transparent' },
+  { name: 'Gray', value: 'rgba(155,154,151,0.35)' },
+  { name: 'Red', value: 'rgba(255,92,92,0.35)' },
+  { name: 'Orange', value: 'rgba(255,163,68,0.35)' },
+  { name: 'Yellow', value: 'rgba(255,212,59,0.35)' },
+  { name: 'Green', value: 'rgba(74,222,128,0.35)' },
+  { name: 'Blue', value: 'rgba(77,166,255,0.35)' },
+  { name: 'Purple', value: 'rgba(179,136,255,0.35)' },
+  { name: 'Pink', value: 'rgba(255,143,214,0.35)' }
+];
+
+function buildColorPicker({ btnId, popoverId, swatchId, command, palette, defaultValue }) {
+  const btn = document.getElementById(btnId);
+  const popover = document.getElementById(popoverId);
+  const swatch = document.getElementById(swatchId);
+
+  popover.innerHTML = palette
     .map(
-      (c) =>
-        `<button type="button" class="color-swatch" data-color="${c}" style="background:${c === 'transparent' ? 'repeating-conic-gradient(#888 0% 25%, transparent 0% 50%) 0 0 / 8px 8px' : c}" aria-label="${c}"></button>`
+      (c) => `
+        <button type="button" class="color-picker-option" data-color="${c.value === null ? '' : c.value}" title="${c.name}">
+          <span class="color-picker-option-swatch" style="background:${c.swatch || c.value}"></span>
+          ${c.name}
+        </button>
+      `
     )
     .join('');
-  container.querySelectorAll('.color-swatch').forEach((btn) => {
-    btn.addEventListener('click', () => {
+
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    document.querySelectorAll('.color-picker-popover').forEach((p) => {
+      if (p !== popover) p.hidden = true;
+    });
+    popover.hidden = !popover.hidden;
+  });
+
+  popover.querySelectorAll('.color-picker-option').forEach((option) => {
+    option.addEventListener('click', () => {
       editorSurface.focus();
-      document.execCommand(command, false, btn.dataset.color === 'transparent' ? 'inherit' : btn.dataset.color);
+      document.execCommand(command, false, option.dataset.color || defaultValue);
+      swatch.style.background = option.querySelector('.color-picker-option-swatch').style.background;
+      popover.hidden = true;
       scheduleAutosave();
     });
   });
 }
 
-buildSwatchGroup('text-color-group', 'foreColor', ['#f6f4ff', '#ff2b2b', '#ff7a1a', '#4da6ff', '#b388ff', '#3ddc84']);
-buildSwatchGroup('highlight-color-group', 'hiliteColor', ['transparent', '#fff59d', '#ffab91', '#80d8ff', '#c5e1a5', '#e1bee7']);
+buildColorPicker({
+  btnId: 'text-color-btn',
+  popoverId: 'text-color-popover',
+  swatchId: 'text-color-swatch',
+  command: 'foreColor',
+  palette: TEXT_COLOR_PALETTE,
+  defaultValue: getComputedStyle(document.body).getPropertyValue('--text').trim() || '#ffffff'
+});
 
-const fontSizeMap = { 1: '12px', 2: '14px', 3: '16px', 4: '18px', 5: '24px', 6: '32px', 7: '40px' };
+buildColorPicker({
+  btnId: 'highlight-color-btn',
+  popoverId: 'highlight-color-popover',
+  swatchId: 'highlight-color-swatch',
+  command: 'hiliteColor',
+  palette: HIGHLIGHT_COLOR_PALETTE,
+  defaultValue: 'transparent'
+});
 
-document.getElementById('font-size-select').addEventListener('change', (event) => {
+document.addEventListener('click', (event) => {
+  if (event.target.closest('.color-picker')) return;
+  document.querySelectorAll('.color-picker-popover').forEach((p) => {
+    p.hidden = true;
+  });
+});
+
+// Numeric px size input (Google Docs-style) instead of a small/normal/large/huge
+// dropdown - execCommand only understands the 1-7 scale, so this still routes
+// through it as a marker, then swaps the resulting <font size> tags for a real
+// pixel value.
+const fontSizeInput = document.getElementById('font-size-input');
+
+fontSizeInput.addEventListener('change', () => {
+  const px = Math.max(8, Math.min(96, Number(fontSizeInput.value) || 16));
+  fontSizeInput.value = px;
   editorSurface.focus();
-  document.execCommand('fontSize', false, event.target.value);
-  editorSurface.querySelectorAll('font[size]').forEach((el) => {
+  document.execCommand('fontSize', false, '7');
+  editorSurface.querySelectorAll('font[size="7"]').forEach((el) => {
     const span = document.createElement('span');
-    span.style.fontSize = fontSizeMap[el.getAttribute('size')] || '16px';
+    span.style.fontSize = `${px}px`;
+    // execCommand can merge the size onto an existing <font color> element
+    // instead of nesting a new one - carry the color over so it isn't lost.
+    if (el.color) span.style.color = el.color;
     span.innerHTML = el.innerHTML;
     el.replaceWith(span);
   });
@@ -2404,6 +2533,169 @@ editorImageInput.addEventListener('change', async () => {
     console.error(err);
     editorStatus.textContent = 'Image upload failed.';
   }
+});
+
+// Auto-linkify: typing a space right after something that looks like a URL
+// converts it into a real link, the same way most note/chat apps do.
+const URL_PATTERN = /^(https?:\/\/[^\s]+|www\.[^\s]+\.[a-z]{2,}[^\s]*)$/i;
+
+editorSurface.addEventListener('keydown', (event) => {
+  if (event.key !== ' ') return;
+  const sel = window.getSelection();
+  if (!sel || !sel.isCollapsed || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  const before = node.textContent.slice(0, range.startOffset);
+  const lastWord = before.split(/\s+/).pop();
+  if (!lastWord || !URL_PATTERN.test(lastWord)) return;
+
+  event.preventDefault();
+  const href = /^https?:\/\//i.test(lastWord) ? lastWord : `https://${lastWord}`;
+  const prefixLen = before.length - lastWord.length;
+  node.textContent = node.textContent.slice(0, prefixLen) + node.textContent.slice(range.startOffset);
+
+  const newRange = document.createRange();
+  newRange.setStart(node, prefixLen);
+  newRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+  document.execCommand('insertHTML', false, `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(lastWord)}</a>&nbsp;`);
+  scheduleAutosave();
+});
+
+// Manual link insert/edit - pre-fills from the current selection, or from the
+// existing <a> if the cursor is already inside one.
+document.getElementById('editor-link-btn').addEventListener('click', () => {
+  const sel = window.getSelection();
+  if (!sel || !editorSurface.contains(sel.anchorNode)) return;
+
+  const anchorEl = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
+  const existingLink = anchorEl?.closest('a');
+  const selectedText = !sel.isCollapsed ? sel.toString() : '';
+  const savedRange = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+
+  openModal(
+    `
+    <h2>${existingLink ? 'Edit' : 'Insert'} link</h2>
+    <form id="link-form">
+      <label>Text<input type="text" name="text" required value="${escapeHtml(existingLink?.textContent || selectedText)}" /></label>
+      <label>URL<input type="url" name="url" required value="${escapeHtml(existingLink?.href || 'https://')}" placeholder="https://example.com" /></label>
+      <button class="button primary" type="submit">${existingLink ? 'Save' : 'Insert'}</button>
+      ${existingLink ? '<button class="button ghost" type="button" id="link-remove-btn">Remove link</button>' : ''}
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#link-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const text = form.get('text').trim();
+        const url = form.get('url').trim();
+
+        editorSurface.focus();
+        if (existingLink) {
+          existingLink.href = url;
+          existingLink.textContent = text;
+        } else {
+          if (savedRange) {
+            sel.removeAllRanges();
+            sel.addRange(savedRange);
+          }
+          document.execCommand('insertHTML', false, `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`);
+        }
+        closeModal();
+        scheduleAutosave();
+      });
+
+      root.querySelector('#link-remove-btn')?.addEventListener('click', () => {
+        existingLink.replaceWith(document.createTextNode(existingLink.textContent));
+        closeModal();
+        scheduleAutosave();
+      });
+    }
+  );
+});
+
+// Comments: wraps the selection in a highlighted span carrying the comment
+// text as a data attribute (so it saves inline with the note, no separate
+// collection needed) - clicking it later reopens the same form to edit/remove it.
+function openCommentForm(onSubmit, existingText = '') {
+  openModal(
+    `
+    <h2>${existingText ? 'Edit' : 'Add'} comment</h2>
+    <form id="comment-form">
+      <label>Comment<textarea name="comment" rows="3" required>${escapeHtml(existingText)}</textarea></label>
+      <button class="button primary" type="submit">Save</button>
+      ${existingText ? '<button class="button ghost" type="button" id="comment-remove-btn">Remove comment</button>' : ''}
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#comment-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const text = new FormData(event.target).get('comment').trim();
+        closeModal();
+        if (text) onSubmit(text);
+      });
+      root.querySelector('#comment-remove-btn')?.addEventListener('click', () => {
+        closeModal();
+        onSubmit(null);
+      });
+    }
+  );
+}
+
+document.getElementById('editor-comment-btn').addEventListener('click', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !editorSurface.contains(sel.anchorNode)) {
+    editorStatus.textContent = 'Select some text first to comment on it.';
+    return;
+  }
+  const selectedText = sel.toString();
+  const savedRange = sel.getRangeAt(0).cloneRange();
+
+  openCommentForm((commentText) => {
+    if (!commentText) return;
+    editorSurface.focus();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+    document.execCommand(
+      'insertHTML',
+      false,
+      `<span class="note-comment" data-comment="${escapeHtml(commentText)}">${escapeHtml(selectedText)}</span>`
+    );
+    scheduleAutosave();
+  });
+});
+
+editorSurface.addEventListener('click', (event) => {
+  const commentSpan = event.target.closest('.note-comment');
+  if (!commentSpan) return;
+  openCommentForm((newText) => {
+    if (newText === null) {
+      commentSpan.replaceWith(document.createTextNode(commentSpan.textContent));
+    } else {
+      commentSpan.dataset.comment = newText;
+    }
+    scheduleAutosave();
+  }, commentSpan.dataset.comment);
+});
+
+document.getElementById('editor-print-btn').addEventListener('click', () => {
+  window.print();
+});
+
+document.getElementById('editor-download-btn').addEventListener('click', () => {
+  const title = editorTitleInput.value.trim() || 'Untitled note';
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1>${editorSurface.innerHTML}</body></html>`;
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${title.replace(/[^\w\- ]+/g, '').trim() || 'note'}.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 });
 
 // AI menu
@@ -3348,6 +3640,39 @@ const WEATHER_CODES = {
   99: 'Thunderstorm with hail'
 };
 
+const WEATHER_ICONS = {
+  0: 'sunny',
+  1: 'partly_cloudy_day',
+  2: 'partly_cloudy_day',
+  3: 'cloud',
+  45: 'foggy',
+  48: 'foggy',
+  51: 'rainy_light',
+  53: 'rainy_light',
+  55: 'rainy',
+  56: 'weather_mix',
+  57: 'weather_mix',
+  61: 'rainy_light',
+  63: 'rainy',
+  65: 'rainy_heavy',
+  66: 'weather_mix',
+  67: 'weather_mix',
+  71: 'weather_snowy',
+  73: 'weather_snowy',
+  75: 'weather_snowy',
+  77: 'weather_snowy',
+  80: 'rainy',
+  81: 'rainy',
+  82: 'rainy_heavy',
+  85: 'weather_snowy',
+  86: 'weather_snowy',
+  95: 'thunderstorm',
+  96: 'thunderstorm',
+  99: 'thunderstorm'
+};
+
+let weatherCache = null;
+
 function dressAdvice(maxF, rainChance) {
   let dress;
   if (maxF < 45) dress = 'Dress heavy — it’s cold out.';
@@ -3363,6 +3688,7 @@ function dressAdvice(maxF, rainChance) {
 
 async function startWeather() {
   const locEl = document.getElementById('weather-loc');
+  const iconEl = document.getElementById('weather-icon');
   const tempEl = document.getElementById('weather-temp');
   const descEl = document.getElementById('weather-desc');
   const adviceEl = document.getElementById('weather-advice');
@@ -3379,12 +3705,13 @@ async function startWeather() {
       try {
         const [weatherRes, placeRes] = await Promise.all([
           fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto`
+            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto`
           ),
           fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`)
         ]);
         const weather = await weatherRes.json();
         const place = await placeRes.json().catch(() => null);
+        weatherCache = weather;
 
         locEl.textContent = place?.city
           ? `${place.city}${place.principalSubdivisionCode ? ', ' + place.principalSubdivisionCode.split('-').pop() : ''}`
@@ -3392,6 +3719,7 @@ async function startWeather() {
 
         const temp = Math.round(weather.current.temperature_2m);
         tempEl.textContent = `${temp}°`;
+        iconEl.textContent = WEATHER_ICONS[weather.current.weather_code] || 'cloud';
         descEl.textContent = WEATHER_CODES[weather.current.weather_code] || 'Weather unavailable';
 
         const maxF = weather.daily.temperature_2m_max[0];
@@ -3409,6 +3737,48 @@ async function startWeather() {
     { maximumAge: 15 * 60 * 1000, timeout: 10000 }
   );
 }
+
+function openWeatherWeekModal() {
+  if (!weatherCache?.daily) return;
+  const { time, weather_code: codes, temperature_2m_max: maxes, temperature_2m_min: mins, precipitation_probability_max: rain } =
+    weatherCache.daily;
+
+  const cardsHtml = time
+    .map((dateStr, i) => {
+      const d = new Date(`${dateStr}T00:00`);
+      const isToday = i === 0;
+      const rainChance = rain?.[i] || 0;
+      return `
+        <div class="weather-week-day ${isToday ? 'is-today' : ''}">
+          <p class="weather-week-day-name">${isToday ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' })}</p>
+          <span class="material-symbols-outlined weather-week-icon" aria-hidden="true">${WEATHER_ICONS[codes[i]] || 'cloud'}</span>
+          <p class="weather-week-desc">${escapeHtml(WEATHER_CODES[codes[i]] || 'Unknown')}</p>
+          <p class="weather-week-temp"><span class="weather-week-max">${Math.round(maxes[i])}°</span><span class="weather-week-min">${Math.round(mins[i])}°</span></p>
+          <p class="weather-week-rain ${rainChance >= 30 ? 'is-notable' : ''}">
+            <span class="material-symbols-outlined" aria-hidden="true">water_drop</span>${rainChance}%
+          </p>
+        </div>
+      `;
+    })
+    .join('');
+
+  openModal(
+    `
+    <h2>This week’s weather</h2>
+    <div class="weather-week-grid">${cardsHtml}</div>
+  `,
+    null,
+    'modal--wide'
+  );
+}
+
+const overviewWeatherEl = document.getElementById('overview-weather');
+overviewWeatherEl.addEventListener('click', openWeatherWeekModal);
+overviewWeatherEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  openWeatherWeekModal();
+});
 
 /* ==================== utils ==================== */
 
