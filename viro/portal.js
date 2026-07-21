@@ -350,7 +350,6 @@ function enterPortal() {
 function startPortal() {
   startClock();
   startWeather();
-  renderNoteFolderChips();
   updateCalendarWeekLabel();
   subscribeCollections();
 }
@@ -565,7 +564,6 @@ function subscribeCollections() {
       noteFolders = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      renderNoteFolderChips();
       populateNoteFolderSelect();
       renderNotes();
     })
@@ -2176,34 +2174,88 @@ function stripHtml(html) {
   return div.textContent || '';
 }
 
-function noteFolderName(folderId) {
-  const f = noteFolders.find((x) => x.id === folderId);
-  return f ? f.name : '';
+function noteFolderPath(folderId) {
+  const path = [];
+  let cur = folderId;
+  let guard = 0;
+  while (cur && guard++ < 50) {
+    const f = noteFolders.find((x) => x.id === cur);
+    if (!f) break;
+    path.unshift(f);
+    cur = f.parentId || null;
+  }
+  return path;
 }
 
-function renderNoteFolderChips() {
-  const container = document.getElementById('note-folder-chips');
-  const chips = [
-    { id: '', name: 'All notes' },
-    { id: 'unfiled', name: 'Unfiled' },
-    ...noteFolders
-  ];
-  container.innerHTML = chips
-    .map(
-      (f) => `
-        <button type="button" class="folder-chip ${currentNoteFolderId === f.id ? 'is-active' : ''}" data-note-folder-id="${f.id}">
-          <span class="material-symbols-outlined" aria-hidden="true">${f.id ? 'folder' : 'apps'}</span>
-          ${escapeHtml(f.name)}
-        </button>
-      `
-    )
+function noteFolderPathLabel(folderId) {
+  return noteFolderPath(folderId)
+    .map((f) => f.name)
+    .join(' / ');
+}
+
+// Same real-folder navigation model as the Files tab: currentNoteFolderId is
+// the folder you're standing in (null = root), with a breadcrumb + a grid of
+// subfolders above the note list.
+function renderNoteFolderBreadcrumb() {
+  const container = document.getElementById('note-folder-breadcrumb');
+  const crumbs = [{ id: '', name: 'All Notes' }, ...noteFolderPath(currentNoteFolderId)];
+  container.innerHTML = crumbs
+    .map((c, i) => {
+      const isLast = i === crumbs.length - 1;
+      return `
+        <button type="button" class="breadcrumb-item ${isLast ? 'is-current' : ''}" data-note-folder-id="${c.id}" ${isLast ? 'disabled' : ''}>${escapeHtml(c.name)}</button>
+        ${!isLast ? '<span class="material-symbols-outlined breadcrumb-sep" aria-hidden="true">chevron_right</span>' : ''}
+      `;
+    })
     .join('');
 }
 
+function visibleNoteSubfolders() {
+  const query = (document.getElementById('note-search').value || '').toLowerCase();
+  if (aiNoteSearchResultIds || query) return [];
+  return noteFolders
+    .filter((f) => (f.parentId || null) === (currentNoteFolderId || null))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderNoteFolderGrid() {
+  const container = document.getElementById('note-folder-grid');
+  const subfolders = visibleNoteSubfolders();
+  container.hidden = !subfolders.length;
+  if (!subfolders.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = subfolders
+    .map((f) => {
+      const itemCount =
+        notes.filter((n) => (n.folderId || null) === f.id).length +
+        noteFolders.filter((sf) => (sf.parentId || null) === f.id).length;
+      return `
+        <button type="button" class="folder-card" data-open-note-folder="${f.id}">
+          <span class="material-symbols-outlined folder-card-icon" aria-hidden="true">folder</span>
+          <span class="folder-card-name">${escapeHtml(f.name)}</span>
+          <span class="folder-card-count">${itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty'}</span>
+        </button>
+      `;
+    })
+    .join('');
+}
+
+// Indented so nesting is visible in the note editor's folder picker.
 function populateNoteFolderSelect() {
+  function optionsFor(parentId, depth) {
+    return noteFolders
+      .filter((f) => (f.parentId || null) === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap((f) => [
+        `<option value="${f.id}">${'—'.repeat(depth)} ${escapeHtml(f.name)}</option>`,
+        ...optionsFor(f.id, depth + 1)
+      ]);
+  }
   editorFolderSelect.innerHTML = `
     <option value="">No folder</option>
-    ${noteFolders.map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('')}
+    ${optionsFor(null, 1).join('')}
   `;
 }
 
@@ -2225,12 +2277,21 @@ aiNoteSearchStatus.addEventListener('click', (event) => {
   }
 });
 
-document.getElementById('note-folder-chips').addEventListener('click', (event) => {
-  const chip = event.target.closest('[data-note-folder-id]');
-  if (!chip) return;
+document.getElementById('note-folder-breadcrumb').addEventListener('click', (event) => {
+  const crumb = event.target.closest('[data-note-folder-id]');
+  if (!crumb) return;
   clearAiNoteSearch();
-  currentNoteFolderId = chip.dataset.noteFolderId;
-  renderNoteFolderChips();
+  noteSearchInput.value = '';
+  currentNoteFolderId = crumb.dataset.noteFolderId || null;
+  renderNotes();
+});
+
+document.getElementById('note-folder-grid').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-open-note-folder]');
+  if (!card) return;
+  clearAiNoteSearch();
+  noteSearchInput.value = '';
+  currentNoteFolderId = card.dataset.openNoteFolder;
   renderNotes();
 });
 
@@ -2251,7 +2312,7 @@ aiNoteSearchBtn.addEventListener('click', async () => {
       id: n.id,
       type: 'note',
       title: n.title || 'Untitled note',
-      subtitle: [stripHtml(n.contentHtml).slice(0, 140), n.folderId ? noteFolderName(n.folderId) : ''].filter(Boolean).join(' · '),
+      subtitle: [stripHtml(n.contentHtml).slice(0, 140), n.folderId ? noteFolderPathLabel(n.folderId) : ''].filter(Boolean).join(' · '),
       date: n.updatedAt?.toDate ? n.updatedAt.toDate().toLocaleDateString() : ''
     }));
     const result = await requestAi('smart_search', query, { items });
@@ -2274,9 +2335,11 @@ aiNoteSearchBtn.addEventListener('click', async () => {
 });
 
 document.getElementById('add-note-folder-btn').addEventListener('click', () => {
+  const parentLabel = currentNoteFolderId ? noteFolderPathLabel(currentNoteFolderId) : 'All Notes';
   openModal(
     `
     <h2>New folder</h2>
+    <p class="confirm-message">Inside “${escapeHtml(parentLabel)}”</p>
     <form id="note-folder-form">
       <label>Folder name<input type="text" name="name" required /></label>
       <button class="button primary" type="submit">Create</button>
@@ -2288,6 +2351,7 @@ document.getElementById('add-note-folder-btn').addEventListener('click', () => {
         const form = new FormData(event.target);
         await addDoc(userCollection('noteFolders'), {
           name: form.get('name').trim(),
+          parentId: currentNoteFolderId || null,
           createdAt: serverTimestamp()
         });
         closeModal();
@@ -2303,24 +2367,31 @@ function visibleNotes() {
   }
 
   const query = (document.getElementById('note-search').value || '').toLowerCase();
+  if (query) {
+    // Searching flattens across every folder, like any file browser's search.
+    return notes
+      .filter((n) => {
+        const title = (n.title || '').toLowerCase();
+        const body = stripHtml(n.contentHtml).toLowerCase();
+        return title.includes(query) || body.includes(query);
+      })
+      .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0));
+  }
+
   return notes
-    .filter((n) => {
-      if (currentNoteFolderId === 'unfiled' && n.folderId) return false;
-      if (currentNoteFolderId && currentNoteFolderId !== 'unfiled' && n.folderId !== currentNoteFolderId) return false;
-      if (!query) return true;
-      const title = (n.title || '').toLowerCase();
-      const body = stripHtml(n.contentHtml).toLowerCase();
-      return title.includes(query) || body.includes(query);
-    })
+    .filter((n) => (n.folderId || null) === (currentNoteFolderId || null))
     .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0));
 }
 
 function renderNotes() {
+  renderNoteFolderBreadcrumb();
+  renderNoteFolderGrid();
+
   const list = document.getElementById('note-list');
   const items = visibleNotes();
 
   if (!items.length) {
-    list.innerHTML = '<p class="entry-empty">No notes found.</p>';
+    list.innerHTML = visibleNoteSubfolders().length ? '' : '<p class="entry-empty">No notes found.</p>';
     return;
   }
 
@@ -2334,7 +2405,7 @@ function renderNotes() {
         <article class="note-card" data-open-note="${n.id}" tabindex="0" role="button" aria-label="Open ${escapeHtml(n.title || 'Untitled note')}">
           <div class="note-card-title">${escapeHtml(n.title || 'Untitled note')}</div>
           <p class="note-card-snippet">${escapeHtml(snippet) || '<em>Empty note</em>'}</p>
-          <p class="note-card-meta">${updated ? `Updated ${updated}` : ''}${n.folderId ? ` · ${escapeHtml(noteFolderName(n.folderId))}` : ''}</p>
+          <p class="note-card-meta">${updated ? `Updated ${updated}` : ''}${n.folderId ? ` · ${escapeHtml(noteFolderPathLabel(n.folderId))}` : ''}</p>
         </article>
       `;
     })
