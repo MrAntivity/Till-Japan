@@ -19,7 +19,10 @@ const MAX_INPUT_CHARS = 12000; // keeps requests (and cost) bounded
  * request.data: { task, text, context }
  * - continue | improve | grammar | format  -> notes editor (text = note content/selection)
  * - describe_file                           -> Files tab (text = filename, context = { imageUrl? })
- * - smart_search                            -> Files tab (text = query, context = file list)
+ * - smart_search                            -> Files/Drive/Contacts/Overview (text = query,
+ *                                              context = { items: [{id, type, title, subtitle, date}] })
+ * - smart_command                           -> Overview search+add bar (text = free-form instruction,
+ *                                              context = { today: 'YYYY-MM-DD' })
  */
 exports.aiAssist = onCall({ secrets: [openaiApiKey], cors: true }, async (request) => {
   if (!request.auth) {
@@ -65,6 +68,9 @@ exports.aiAssist = onCall({ secrets: [openaiApiKey], cors: true }, async (reques
 
       case 'smart_search':
         return { result: await smartSearch(openai, input, context) };
+
+      case 'smart_command':
+        return { result: await smartCommand(openai, input, context) };
 
       default:
         throw new HttpsError('invalid-argument', `Unknown task: ${task}`);
@@ -119,11 +125,14 @@ async function describeFile(openai, fileName, context) {
 }
 
 async function smartSearch(openai, query, context) {
-  const files = Array.isArray(context?.files) ? context.files : [];
-  if (!files.length || !query.trim()) return { ids: [] };
+  const items = Array.isArray(context?.items) ? context.items : [];
+  if (!items.length || !query.trim()) return { ids: [] };
 
-  const listing = files
-    .map((f) => `id: ${f.id} | name: ${f.name} | description: ${f.description || '(none)'} | folder: ${f.folder || '(none)'} | uploaded: ${f.date || 'unknown'}`)
+  const listing = items
+    .map(
+      (it) =>
+        `id: ${it.id} | type: ${it.type || 'item'} | title: ${it.title} | detail: ${it.subtitle || '(none)'} | date: ${it.date || 'unknown'}`
+    )
     .join('\n');
 
   const completion = await openai.chat.completions.create({
@@ -134,9 +143,9 @@ async function smartSearch(openai, query, context) {
       {
         role: 'system',
         content:
-          'You match a natural-language search query against a list of files (id, name, description, folder, upload date). Return JSON like {"ids": ["id1", "id2"]} listing the ids of files that plausibly match the query, best match first. Consider dates loosely (e.g. "march 2023" matches files uploaded around then). If nothing matches reasonably, return {"ids": []}. Only output the JSON object.'
+          'You match a natural-language search query against a list of personal items (id, type, title, detail, date) from a private organizer app. Return JSON like {"ids": ["id1", "id2"]} listing the ids of items that plausibly match the query, best match first. Consider dates loosely (e.g. "march 2023" matches items from around then) and match across type/title/detail. If nothing matches reasonably, return {"ids": []}. Only output the JSON object.'
       },
-      { role: 'user', content: `Query: ${query}\n\nFiles:\n${listing}` }
+      { role: 'user', content: `Query: ${query}\n\nItems:\n${listing}` }
     ]
   });
 
@@ -146,5 +155,40 @@ async function smartSearch(openai, query, context) {
   } catch (err) {
     console.error('smart_search parse error', err);
     return { ids: [] };
+  }
+}
+
+async function smartCommand(openai, text, context) {
+  const today = context?.today || new Date().toISOString().slice(0, 10);
+
+  const completion = await openai.chat.completions.create({
+    model: MODEL,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `You are the command parser for the search bar of a personal organizer app. Given one short instruction from the user, decide whether they want to ADD a new item (a to-do, a birthday, or a contact) or SEARCH for something that already exists.
+
+Today's date is ${today} (YYYY-MM-DD). Resolve relative dates ("tomorrow", "tmrw", "next friday", "in 3 days") against it.
+
+Return ONLY a JSON object in exactly one of these shapes:
+- To-do: {"intent":"add","type":"todo","todo":{"title":"...","list":"school"|"personal"|"business","deadline":"YYYY-MM-DD"|null}}
+- Birthday: {"intent":"add","type":"birthday","birthday":{"name":"...","date":"YYYY-MM-DD"}}
+- Contact: {"intent":"add","type":"contact","contact":{"name":"...","phone":"","email":""}}
+- Search: {"intent":"search","query":"..."} (query = the instruction cleaned up for keyword search)
+- Can't tell: {"intent":"unclear"}
+
+Only choose "add" when the instruction clearly describes a new to-do/birthday/contact to create. Default a to-do's "list" to "personal" unless school or work/business is clearly implied. Leave fields you're unsure about as empty strings (or null for deadline). Output nothing but the JSON object - no preamble, no code fences.`
+      },
+      { role: 'user', content: text }
+    ]
+  });
+
+  try {
+    return JSON.parse(completion.choices[0]?.message?.content || '{}');
+  } catch (err) {
+    console.error('smart_command parse error', err);
+    return { intent: 'unclear' };
   }
 }

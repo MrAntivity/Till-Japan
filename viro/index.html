@@ -77,6 +77,21 @@
       <main class="portal-main">
         <!-- ---------- OVERVIEW ---------- -->
         <section class="portal-tab" id="tab-overview" data-tab-panel="overview">
+          <div class="universal-search">
+            <div class="universal-search-bar">
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+              <input
+                type="text"
+                id="universal-search-input"
+                placeholder="Search everything, or tell it what to add — “take out trash tmrw”…"
+                aria-label="Search everything, or tell it what to add"
+              />
+              <button class="button primary" id="universal-search-btn" type="button">Go</button>
+            </div>
+            <p class="universal-search-status" id="universal-search-status" hidden></p>
+            <div class="universal-search-results" id="universal-search-results" hidden></div>
+          </div>
+
           <div class="overview-top">
             <div class="overview-card overview-clock">
               <p class="overview-date" id="overview-date">—</p>
@@ -183,7 +198,9 @@
             <h2>Files</h2>
             <div class="tab-toolbar-actions">
               <input type="search" id="file-search" placeholder="Search by name or description…" aria-label="Search files" />
-              <button class="button ghost" id="ai-search-btn" type="button" title="Ask AI to find a file">✨ Smart search</button>
+              <button class="icon-btn icon-btn--ai" id="ai-search-btn" type="button" title="Smart search" aria-label="Smart search">
+                <span class="material-symbols-outlined">auto_awesome</span>
+              </button>
               <button class="button ghost" id="add-folder-btn" type="button">+ Folder</button>
               <button class="button primary" id="add-file-btn" type="button">+ Upload</button>
             </div>
@@ -202,10 +219,14 @@
               <h2>Drive</h2>
               <div class="tab-toolbar-actions">
                 <input type="search" id="note-search" placeholder="Search notes…" aria-label="Search notes" />
+                <button class="icon-btn icon-btn--ai" id="ai-note-search-btn" type="button" title="Smart search" aria-label="Smart search">
+                  <span class="material-symbols-outlined">auto_awesome</span>
+                </button>
                 <button class="button ghost" id="add-note-folder-btn" type="button">+ Folder</button>
                 <button class="button primary" id="add-note-btn" type="button">+ New note</button>
               </div>
             </div>
+            <p class="ai-search-status" id="ai-note-search-status" hidden></p>
             <div class="folder-chips" id="note-folder-chips"></div>
             <div class="note-grid" id="note-list">
               <p class="entry-empty">No notes yet.</p>
@@ -267,9 +288,13 @@
             <h2>Contacts</h2>
             <div class="tab-toolbar-actions">
               <input type="search" id="contact-search" placeholder="Search by name…" aria-label="Search contacts" />
+              <button class="icon-btn icon-btn--ai" id="ai-contact-search-btn" type="button" title="Smart search" aria-label="Smart search">
+                <span class="material-symbols-outlined">auto_awesome</span>
+              </button>
               <button class="button primary" id="add-contact-btn" type="button">+ Add</button>
             </div>
           </div>
+          <p class="ai-search-status" id="ai-contact-search-status" hidden></p>
           <div class="entry-list" id="contact-list">
             <p class="entry-empty">No contacts saved yet.</p>
           </div>

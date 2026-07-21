@@ -162,6 +162,8 @@ let noteFolders = [];
 let notes = [];
 let currentNoteFolderId = '';
 let currentNoteId = null;
+let aiNoteSearchResultIds = null;
+let aiContactSearchResultIds = null;
 const unsubscribers = [];
 
 /* ==================== DOM refs ==================== */
@@ -362,12 +364,27 @@ document.addEventListener('click', (event) => {
   requestTabSwitch(link.dataset.gotoTab);
 });
 
-function requestTabSwitch(tabName) {
+function requestTabSwitch(tabName, onArrive) {
   if (tabName === 'vault' && !vaultUnlocked) {
-    openVaultUnlockPrompt(() => switchTab('vault'));
+    openVaultUnlockPrompt(() => {
+      switchTab('vault');
+      onArrive?.();
+    });
     return;
   }
   switchTab(tabName);
+  onArrive?.();
+}
+
+// Briefly flashes and scrolls to the card for `id` - used when jumping to a
+// result from the Overview universal search, since that search spans every
+// tab and the matching card might be off-screen or the tab just switched to.
+function highlightEntry(id) {
+  const el = document.querySelector(`.entry-card[data-id="${CSS.escape(id)}"]`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('entry-highlight');
+  setTimeout(() => el.classList.remove('entry-highlight'), 1800);
 }
 
 function openVaultUnlockPrompt(onSuccess) {
@@ -427,6 +444,26 @@ function closeModal() {
   modalBackdrop.hidden = true;
   modalContent.innerHTML = '';
   activePager = null;
+}
+
+function confirmDelete(message, onConfirm) {
+  openModal(
+    `
+    <h2>Delete?</h2>
+    <p class="confirm-message">${escapeHtml(message)}</p>
+    <div class="confirm-actions">
+      <button class="button ghost" type="button" id="confirm-cancel-btn">Cancel</button>
+      <button class="button danger" type="button" id="confirm-delete-btn">Delete</button>
+    </div>
+  `,
+    (root) => {
+      root.querySelector('#confirm-cancel-btn').addEventListener('click', closeModal);
+      root.querySelector('#confirm-delete-btn').addEventListener('click', () => {
+        closeModal();
+        onConfirm();
+      });
+    }
+  );
 }
 
 modalClose.addEventListener('click', closeModal);
@@ -667,7 +704,10 @@ document.getElementById('birthday-list').addEventListener('click', (event) => {
   }
   const deleteBtn = event.target.closest('[data-delete-birthday]');
   if (deleteBtn) {
-    deleteDoc(userDoc('birthdays', deleteBtn.dataset.deleteBirthday));
+    const item = birthdays.find((b) => b.id === deleteBtn.dataset.deleteBirthday);
+    confirmDelete(`Delete ${item ? `“${item.name}”` : 'this birthday'}? This can’t be undone.`, () => {
+      deleteDoc(userDoc('birthdays', deleteBtn.dataset.deleteBirthday));
+    });
   }
 });
 
@@ -800,7 +840,10 @@ document.querySelector('.todo-columns').addEventListener('click', (event) => {
   }
   const deleteBtn = event.target.closest('[data-delete-todo]');
   if (deleteBtn) {
-    deleteDoc(userDoc('todos', deleteBtn.dataset.deleteTodo));
+    const item = todos[deleteBtn.dataset.category]?.find((t) => t.id === deleteBtn.dataset.deleteTodo);
+    confirmDelete(`Delete ${item ? `“${item.title}”` : 'this to-do'}? This can’t be undone.`, () => {
+      deleteDoc(userDoc('todos', deleteBtn.dataset.deleteTodo));
+    });
   }
 });
 
@@ -938,8 +981,11 @@ document.getElementById('vault-list').addEventListener('click', async (event) =>
 
   const deleteBtn = event.target.closest('[data-delete-vault]');
   if (deleteBtn) {
-    revealedVaultPayloads.delete(deleteBtn.dataset.deleteVault);
-    deleteDoc(userDoc('vault', deleteBtn.dataset.deleteVault));
+    const item = vaultEntries.find((v) => v.id === deleteBtn.dataset.deleteVault);
+    confirmDelete(`Delete ${item ? `“${item.name}”` : 'this entry'}? This can’t be undone.`, () => {
+      revealedVaultPayloads.delete(deleteBtn.dataset.deleteVault);
+      deleteDoc(userDoc('vault', deleteBtn.dataset.deleteVault));
+    });
   }
 });
 
@@ -1057,10 +1103,14 @@ function openVaultForm(type, existing = null) {
 
 function renderContacts() {
   const list = document.getElementById('contact-list');
-  const query = (document.getElementById('contact-search').value || '').toLowerCase();
-  const items = contacts
-    .filter((c) => c.name.toLowerCase().includes(query))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  let items;
+  if (aiContactSearchResultIds) {
+    const byId = new Map(contacts.map((c) => [c.id, c]));
+    items = aiContactSearchResultIds.map((id) => byId.get(id)).filter(Boolean);
+  } else {
+    const query = (document.getElementById('contact-search').value || '').toLowerCase();
+    items = contacts.filter((c) => c.name.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
+  }
 
   if (!items.length) {
     list.innerHTML = '<p class="entry-empty">No contacts found.</p>';
@@ -1112,7 +1162,67 @@ function renderContacts() {
     .join('');
 }
 
-document.getElementById('contact-search').addEventListener('input', renderContacts);
+const aiContactSearchBtn = document.getElementById('ai-contact-search-btn');
+const aiContactSearchStatus = document.getElementById('ai-contact-search-status');
+const contactSearchInput = document.getElementById('contact-search');
+
+function clearAiContactSearch() {
+  if (!aiContactSearchResultIds) return;
+  aiContactSearchResultIds = null;
+  aiContactSearchStatus.hidden = true;
+  aiContactSearchBtn.classList.remove('is-active');
+}
+
+contactSearchInput.addEventListener('input', () => {
+  clearAiContactSearch();
+  renderContacts();
+});
+
+aiContactSearchStatus.addEventListener('click', (event) => {
+  if (event.target.closest('[data-clear-ai-search]')) {
+    clearAiContactSearch();
+    renderContacts();
+  }
+});
+
+aiContactSearchBtn.addEventListener('click', async () => {
+  const query = contactSearchInput.value.trim();
+  if (!query) {
+    aiContactSearchStatus.hidden = false;
+    aiContactSearchStatus.textContent = 'Type what you’re looking for first.';
+    return;
+  }
+
+  aiContactSearchStatus.hidden = false;
+  aiContactSearchStatus.textContent = 'Asking AI…';
+  aiContactSearchBtn.disabled = true;
+
+  try {
+    const items = contacts.map((c) => ({
+      id: c.id,
+      type: 'contact',
+      title: c.name,
+      subtitle: [c.company, c.phone, c.email].filter(Boolean).join(' · '),
+      date: ''
+    }));
+    const result = await requestAi('smart_search', query, { items });
+    const ids = result?.ids || [];
+    if (!ids.length) {
+      aiContactSearchResultIds = null;
+      aiContactSearchBtn.classList.remove('is-active');
+      aiContactSearchStatus.textContent = 'No AI matches found.';
+    } else {
+      aiContactSearchResultIds = ids;
+      aiContactSearchBtn.classList.add('is-active');
+      aiContactSearchStatus.innerHTML = `AI found ${ids.length} match${ids.length === 1 ? '' : 'es'}. <button type="button" data-clear-ai-search>Clear</button>`;
+    }
+    renderContacts();
+  } catch (err) {
+    aiContactSearchStatus.textContent = err.message || 'AI search failed.';
+  } finally {
+    aiContactSearchBtn.disabled = false;
+  }
+});
 
 document.getElementById('add-contact-btn').addEventListener('click', () => openContactForm());
 
@@ -1165,7 +1275,10 @@ document.getElementById('contact-list').addEventListener('click', (event) => {
   }
   const deleteBtn = event.target.closest('[data-delete-contact]');
   if (deleteBtn) {
-    deleteDoc(userDoc('contacts', deleteBtn.dataset.deleteContact));
+    const item = contacts.find((c) => c.id === deleteBtn.dataset.deleteContact);
+    confirmDelete(`Delete ${item ? `“${item.name}”` : 'this contact'}? This can’t be undone.`, () => {
+      deleteDoc(userDoc('contacts', deleteBtn.dataset.deleteContact));
+    });
   }
 });
 
@@ -1402,14 +1515,14 @@ aiSearchBtn.addEventListener('click', async () => {
   aiSearchBtn.disabled = true;
 
   try {
-    const compactFiles = files.map((f) => ({
+    const items = files.map((f) => ({
       id: f.id,
-      name: f.name,
-      description: f.description || '',
-      folder: f.folderId ? folderName(f.folderId) : '',
+      type: 'file',
+      title: f.name,
+      subtitle: [f.description, f.folderId ? folderName(f.folderId) : ''].filter(Boolean).join(' · '),
       date: fileUploadedLabel(f)
     }));
-    const result = await requestAi('smart_search', query, { files: compactFiles });
+    const result = await requestAi('smart_search', query, { items });
     const ids = result?.ids || [];
     if (!ids.length) {
       aiSearchResultIds = null;
@@ -1849,7 +1962,9 @@ document.getElementById('file-list').addEventListener('click', (event) => {
   const deleteBtn = event.target.closest('[data-delete-file]');
   if (deleteBtn) {
     const file = files.find((f) => f.id === deleteBtn.dataset.deleteFile);
-    if (file) deleteFile(file);
+    if (file) {
+      confirmDelete(`Delete “${file.name}”? This can’t be undone.`, () => deleteFile(file));
+    }
     return;
   }
 
@@ -1927,12 +2042,70 @@ function populateNoteFolderSelect() {
   `;
 }
 
+const aiNoteSearchBtn = document.getElementById('ai-note-search-btn');
+const aiNoteSearchStatus = document.getElementById('ai-note-search-status');
+const noteSearchInput = document.getElementById('note-search');
+
+function clearAiNoteSearch() {
+  if (!aiNoteSearchResultIds) return;
+  aiNoteSearchResultIds = null;
+  aiNoteSearchStatus.hidden = true;
+  aiNoteSearchBtn.classList.remove('is-active');
+}
+
+aiNoteSearchStatus.addEventListener('click', (event) => {
+  if (event.target.closest('[data-clear-ai-search]')) {
+    clearAiNoteSearch();
+    renderNotes();
+  }
+});
+
 document.getElementById('note-folder-chips').addEventListener('click', (event) => {
   const chip = event.target.closest('[data-note-folder-id]');
   if (!chip) return;
+  clearAiNoteSearch();
   currentNoteFolderId = chip.dataset.noteFolderId;
   renderNoteFolderChips();
   renderNotes();
+});
+
+aiNoteSearchBtn.addEventListener('click', async () => {
+  const query = noteSearchInput.value.trim();
+  if (!query) {
+    aiNoteSearchStatus.hidden = false;
+    aiNoteSearchStatus.textContent = 'Type what you’re looking for first.';
+    return;
+  }
+
+  aiNoteSearchStatus.hidden = false;
+  aiNoteSearchStatus.textContent = 'Asking AI…';
+  aiNoteSearchBtn.disabled = true;
+
+  try {
+    const items = notes.map((n) => ({
+      id: n.id,
+      type: 'note',
+      title: n.title || 'Untitled note',
+      subtitle: [stripHtml(n.contentHtml).slice(0, 140), n.folderId ? noteFolderName(n.folderId) : ''].filter(Boolean).join(' · '),
+      date: n.updatedAt?.toDate ? n.updatedAt.toDate().toLocaleDateString() : ''
+    }));
+    const result = await requestAi('smart_search', query, { items });
+    const ids = result?.ids || [];
+    if (!ids.length) {
+      aiNoteSearchResultIds = null;
+      aiNoteSearchBtn.classList.remove('is-active');
+      aiNoteSearchStatus.textContent = 'No AI matches found.';
+    } else {
+      aiNoteSearchResultIds = ids;
+      aiNoteSearchBtn.classList.add('is-active');
+      aiNoteSearchStatus.innerHTML = `AI found ${ids.length} match${ids.length === 1 ? '' : 'es'}. <button type="button" data-clear-ai-search>Clear</button>`;
+    }
+    renderNotes();
+  } catch (err) {
+    aiNoteSearchStatus.textContent = err.message || 'AI search failed.';
+  } finally {
+    aiNoteSearchBtn.disabled = false;
+  }
 });
 
 document.getElementById('add-note-folder-btn').addEventListener('click', () => {
@@ -1959,6 +2132,11 @@ document.getElementById('add-note-folder-btn').addEventListener('click', () => {
 });
 
 function visibleNotes() {
+  if (aiNoteSearchResultIds) {
+    const byId = new Map(notes.map((n) => [n.id, n]));
+    return aiNoteSearchResultIds.map((id) => byId.get(id)).filter(Boolean);
+  }
+
   const query = (document.getElementById('note-search').value || '').toLowerCase();
   return notes
     .filter((n) => {
@@ -1998,7 +2176,10 @@ function renderNotes() {
     .join('');
 }
 
-document.getElementById('note-search').addEventListener('input', renderNotes);
+noteSearchInput.addEventListener('input', () => {
+  clearAiNoteSearch();
+  renderNotes();
+});
 
 document.getElementById('note-list').addEventListener('click', (event) => {
   const card = event.target.closest('[data-open-note]');
@@ -2045,12 +2226,15 @@ document.getElementById('editor-back-btn').addEventListener('click', () => {
   driveListView.hidden = false;
 });
 
-document.getElementById('editor-delete-btn').addEventListener('click', async () => {
+document.getElementById('editor-delete-btn').addEventListener('click', () => {
   if (!currentNoteId) return;
-  await deleteDoc(userDoc('notes', currentNoteId));
-  currentNoteId = null;
-  driveEditorView.hidden = true;
-  driveListView.hidden = false;
+  const title = editorTitleInput.value.trim() || 'this note';
+  confirmDelete(`Delete “${title}”? This can’t be undone.`, async () => {
+    await deleteDoc(userDoc('notes', currentNoteId));
+    currentNoteId = null;
+    driveEditorView.hidden = true;
+    driveListView.hidden = false;
+  });
 });
 
 // Debounced autosave: fires ~1s after the last edit, and can be flushed
@@ -2234,6 +2418,241 @@ aiMenuDropdown.querySelectorAll('[data-ai-task]').forEach((btn) => {
       editorStatus.textContent = err.message || 'AI request failed.';
     }
   });
+});
+
+/* ==================== overview: universal search + add ==================== */
+
+const UNIVERSAL_TYPE_ICON = {
+  todo: 'checklist',
+  birthday: 'cake',
+  contact: 'person',
+  vault: 'key',
+  file: 'description',
+  note: 'article'
+};
+
+const UNIVERSAL_TYPE_LABEL = {
+  todo: 'To-do',
+  birthday: 'Birthday',
+  contact: 'Contact',
+  vault: 'Vault',
+  file: 'File',
+  note: 'Note'
+};
+
+const UNIVERSAL_TYPE_TAB = {
+  todo: 'todos',
+  birthday: 'birthdays',
+  contact: 'contacts',
+  vault: 'vault',
+  file: 'files',
+  note: 'drive'
+};
+
+function buildGlobalSearchItems() {
+  const items = [];
+
+  ['school', 'personal', 'business'].forEach((category) => {
+    (todos[category] || []).forEach((t) => {
+      items.push({
+        id: t.id,
+        type: 'todo',
+        category,
+        title: t.title,
+        subtitle: [CATEGORY_LABEL[category], t.description].filter(Boolean).join(' · '),
+        date: t.deadline || ''
+      });
+    });
+  });
+
+  birthdays.forEach((b) => {
+    items.push({ id: b.id, type: 'birthday', title: b.name, subtitle: b.relationship || '', date: b.date });
+  });
+
+  contacts.forEach((c) => {
+    items.push({
+      id: c.id,
+      type: 'contact',
+      title: c.name,
+      subtitle: [c.company, c.phone, c.email].filter(Boolean).join(' · '),
+      date: ''
+    });
+  });
+
+  vaultEntries.forEach((v) => {
+    items.push({ id: v.id, type: 'vault', title: v.name, subtitle: VAULT_TYPES[v.type]?.label || v.type, date: '' });
+  });
+
+  files.forEach((f) => {
+    items.push({
+      id: f.id,
+      type: 'file',
+      title: f.name,
+      subtitle: [f.description, f.folderId ? folderName(f.folderId) : ''].filter(Boolean).join(' · '),
+      date: fileUploadedLabel(f)
+    });
+  });
+
+  notes.forEach((n) => {
+    items.push({
+      id: n.id,
+      type: 'note',
+      title: n.title || 'Untitled note',
+      subtitle: stripHtml(n.contentHtml).slice(0, 140),
+      date: n.updatedAt?.toDate ? n.updatedAt.toDate().toLocaleDateString() : ''
+    });
+  });
+
+  return items;
+}
+
+const universalSearchInput = document.getElementById('universal-search-input');
+const universalSearchBtn = document.getElementById('universal-search-btn');
+const universalSearchStatus = document.getElementById('universal-search-status');
+const universalSearchResults = document.getElementById('universal-search-results');
+
+function renderUniversalResults(ids, items) {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const matched = ids.map((id) => byId.get(id)).filter(Boolean);
+
+  if (!matched.length) {
+    universalSearchResults.hidden = true;
+    universalSearchResults.innerHTML = '';
+    return;
+  }
+
+  universalSearchResults.hidden = false;
+  universalSearchResults.innerHTML = matched
+    .map(
+      (it) => `
+        <button type="button" class="universal-result" data-type="${it.type}" data-id="${it.id}" data-category="${it.category || ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">${UNIVERSAL_TYPE_ICON[it.type] || 'search'}</span>
+          <span class="universal-result-text">
+            <span class="universal-result-title">${escapeHtml(it.title)}</span>
+            ${it.subtitle ? `<span class="universal-result-subtitle">${escapeHtml(it.subtitle)}</span>` : ''}
+          </span>
+          <span class="universal-result-type">${UNIVERSAL_TYPE_LABEL[it.type] || ''}</span>
+        </button>
+      `
+    )
+    .join('');
+}
+
+universalSearchResults.addEventListener('click', (event) => {
+  const btn = event.target.closest('.universal-result');
+  if (!btn) return;
+  const { type, id } = btn.dataset;
+  const tab = UNIVERSAL_TYPE_TAB[type];
+  if (!tab) return;
+
+  requestTabSwitch(tab, () => {
+    if (type === 'note') {
+      const note = notes.find((n) => n.id === id);
+      if (note) openNoteEditor(note);
+    } else if (type === 'file') {
+      const file = files.find((f) => f.id === id);
+      if (file) openFilePreview(file);
+    } else {
+      highlightEntry(id);
+    }
+  });
+});
+
+async function runUniversalSearch(query) {
+  universalSearchStatus.hidden = false;
+  universalSearchStatus.textContent = 'Searching…';
+  const items = buildGlobalSearchItems();
+  const result = await requestAi('smart_search', query, { items });
+  const ids = result?.ids || [];
+  renderUniversalResults(ids, items);
+  universalSearchStatus.textContent = ids.length
+    ? `Found ${ids.length} match${ids.length === 1 ? '' : 'es'}.`
+    : 'No matches found.';
+}
+
+async function runUniversalCommand(text) {
+  universalSearchStatus.hidden = false;
+  universalSearchStatus.textContent = 'Thinking…';
+  universalSearchResults.hidden = true;
+
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const result = await requestAi('smart_command', text, { today: todayIso });
+
+  if (result?.intent === 'add' && result.type === 'todo' && result.todo?.title) {
+    const list = ['school', 'personal', 'business'].includes(result.todo.list) ? result.todo.list : 'personal';
+    await addDoc(userCollection('todos'), {
+      category: list,
+      title: result.todo.title,
+      deadline: result.todo.deadline || null,
+      description: '',
+      completed: false,
+      createdAt: serverTimestamp()
+    });
+    universalSearchStatus.textContent = `Added “${result.todo.title}” to ${CATEGORY_LABEL[list]} to-dos${
+      result.todo.deadline ? ` — due ${new Date(result.todo.deadline + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''
+    }.`;
+    universalSearchInput.value = '';
+    return;
+  }
+
+  if (result?.intent === 'add' && result.type === 'birthday' && result.birthday?.name && result.birthday?.date) {
+    await addDoc(userCollection('birthdays'), {
+      name: result.birthday.name,
+      date: result.birthday.date,
+      relationship: 'Other',
+      notes: '',
+      createdAt: serverTimestamp()
+    });
+    universalSearchStatus.textContent = `Added ${result.birthday.name}’s birthday.`;
+    universalSearchInput.value = '';
+    return;
+  }
+
+  if (result?.intent === 'add' && result.type === 'contact' && result.contact?.name) {
+    await addDoc(userCollection('contacts'), {
+      name: result.contact.name,
+      company: '',
+      phone: result.contact.phone || '',
+      email: result.contact.email || '',
+      urls: '',
+      createdAt: serverTimestamp()
+    });
+    universalSearchStatus.textContent = `Added ${result.contact.name} to contacts.`;
+    universalSearchInput.value = '';
+    return;
+  }
+
+  if (result?.intent === 'search') {
+    await runUniversalSearch(result.query || text);
+    return;
+  }
+
+  universalSearchStatus.textContent = 'Not sure what you meant — try rephrasing, or search by keyword.';
+}
+
+async function handleUniversalSubmit() {
+  const text = universalSearchInput.value.trim();
+  if (!text) return;
+
+  universalSearchBtn.disabled = true;
+  try {
+    await runUniversalCommand(text);
+  } catch (err) {
+    universalSearchStatus.hidden = false;
+    universalSearchStatus.textContent = err.message || 'Something went wrong.';
+  } finally {
+    universalSearchBtn.disabled = false;
+  }
+}
+
+universalSearchBtn.addEventListener('click', handleUniversalSubmit);
+universalSearchInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    handleUniversalSubmit();
+  }
 });
 
 /* ==================== overview: clock ==================== */
