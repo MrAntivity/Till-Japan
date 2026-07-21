@@ -133,6 +133,20 @@ body[data-portal='true'] {
   font-weight: 700;
   letter-spacing: 0.2em;
   font-size: 0.95rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  padding: 0;
+  cursor: pointer;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.portal-header .brand:hover {
+  opacity: 0.7;
+}
+
+.portal-header .brand:active {
+  transform: scale(0.94);
 }
 
 .portal-nav {
@@ -529,8 +543,7 @@ body[data-portal='true'] {
 }
 
 .modal input,
-.modal textarea,
-.modal select {
+.modal textarea {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -541,10 +554,62 @@ body[data-portal='true'] {
 }
 
 .modal input:focus,
-.modal textarea:focus,
-.modal select:focus {
+.modal textarea:focus {
   outline: none;
   border-color: rgba(176, 176, 176, 0.6);
+}
+
+/* -------------------- dropdowns -------------------- */
+/* Custom chevron + appearance:none so every <select> matches the theme
+   instead of falling back to the OS-native control. The option list itself
+   is still browser-native, so its colors are set explicitly below - without
+   that, browsers can render it with light-mode chrome even on a dark page
+   (inheriting our white text onto a white popup = invisible). */
+
+.modal select,
+.editor-header select,
+#font-size-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 12px 40px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: rgba(255, 255, 255, 0.04);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%23b0b0b0' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.modal select:hover,
+.editor-header select:hover,
+#font-size-select:hover {
+  border-color: rgba(176, 176, 176, 0.5);
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.modal select:focus,
+.editor-header select:focus,
+#font-size-select:focus {
+  outline: none;
+  border-color: rgba(176, 176, 176, 0.6);
+  box-shadow: 0 0 0 4px rgba(176, 176, 176, 0.16);
+}
+
+select option {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body[data-theme='light'] .modal select,
+body[data-theme='light'] .editor-header select,
+body[data-theme='light'] #font-size-select {
+  background-color: rgba(10, 10, 10, 0.03);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%234a4a4a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .modal .button {
@@ -748,6 +813,20 @@ body[data-portal='true'] {
   border: none;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.preview-video {
+  display: block;
+  width: 100%;
+  max-height: 60vh;
+  border-radius: 12px;
+  background: #000;
+}
+
+.preview-audio {
+  display: block;
+  width: 100%;
+  margin: 24px 0;
 }
 
 .preview-fallback {
@@ -1006,15 +1085,6 @@ body[data-portal='true'] {
   border-color: rgba(176, 176, 176, 0.6);
 }
 
-.editor-header select {
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  font: inherit;
-}
-
 .editor-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1085,12 +1155,8 @@ body[data-portal='true'] {
 }
 
 #font-size-select {
-  padding: 8px 10px;
+  padding: 8px 34px 8px 10px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  font: inherit;
   font-size: 0.85rem;
 }
 

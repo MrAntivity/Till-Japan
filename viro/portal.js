@@ -182,6 +182,38 @@ const modalBackdrop = document.getElementById('modal-backdrop');
 const modalContent = document.getElementById('modal-content');
 const modalClose = document.getElementById('modal-close');
 
+/* ==================== theme ==================== */
+/* Shares the same localStorage key and view-transition reveal animation as
+   the main site (see ../script.js) so light/dark preference and the
+   click-origin circle-wipe are identical across both. */
+
+const THEME_STORAGE_KEY = 'aidenyue-theme-preference';
+const themeToggleBtn = document.getElementById('theme-toggle');
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function setTheme(theme) {
+  document.body.dataset.theme = theme;
+}
+
+const savedTheme = window.localStorage?.getItem(THEME_STORAGE_KEY);
+setTheme(savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'dark');
+
+themeToggleBtn?.addEventListener('click', (event) => {
+  const nextTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
+  window.localStorage?.setItem(THEME_STORAGE_KEY, nextTheme);
+
+  const originX = event.clientX || themeToggleBtn.getBoundingClientRect().left;
+  const originY = event.clientY || themeToggleBtn.getBoundingClientRect().top;
+  document.documentElement.style.setProperty('--theme-x', `${originX}px`);
+  document.documentElement.style.setProperty('--theme-y', `${originY}px`);
+
+  if (!prefersReducedMotion && document.startViewTransition) {
+    document.startViewTransition(() => setTheme(nextTheme));
+  } else {
+    setTheme(nextTheme);
+  }
+});
+
 /* ==================== login ==================== */
 
 let manualLoginInProgress = false;
@@ -1149,14 +1181,78 @@ function folderName(folderId) {
   return f ? f.name : '';
 }
 
-function fileIcon(contentType) {
-  if (contentType?.startsWith('image/')) return 'image';
-  if (contentType === 'application/pdf') return 'picture_as_pdf';
-  if (contentType?.includes('word')) return 'description';
-  if (contentType?.includes('sheet') || contentType?.includes('excel')) return 'table_chart';
-  if (contentType?.startsWith('video/')) return 'videocam';
-  if (contentType?.startsWith('audio/')) return 'audiotrack';
-  return 'insert_drive_file';
+// Files uploaded before the multi-page feature existed stored their storage
+// path/URL/contentType directly on the file document instead of inside a
+// `pages` array. This normalizes either shape into a pages array so every
+// other function (render, preview, delete) only has to handle one format.
+function filePages(file) {
+  if (file.pages && file.pages.length) return file.pages;
+  if (file.storagePath) {
+    return [
+      {
+        fileName: file.fileName || file.name,
+        contentType: file.contentType,
+        size: file.size,
+        storagePath: file.storagePath,
+        downloadURL: file.downloadURL
+      }
+    ];
+  }
+  return [];
+}
+
+const FILE_EXT_KIND = {
+  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif', 'heic', 'tif', 'tiff'],
+  pdf: ['pdf'],
+  video: ['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv'],
+  audio: ['mp3', 'wav', 'm4a', 'ogg', 'flac'],
+  text: ['txt', 'md', 'csv', 'json', 'log', 'xml'],
+  word: ['doc', 'docx'],
+  sheet: ['xls', 'xlsx'],
+  design: ['psd', 'ai', 'eps', 'indd', 'sketch', 'fig', 'xd'],
+  archive: ['zip', 'rar', '7z', 'tar', 'gz']
+};
+
+// Browser-reported contentType is the primary signal, but it's often blank
+// or generic (application/octet-stream) for less common formats - the file
+// extension is a reliable fallback for those.
+function classifyFile(contentType, fileName) {
+  const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+  if (contentType?.startsWith('image/') || FILE_EXT_KIND.image.includes(ext)) return 'image';
+  if (contentType === 'application/pdf' || ext === 'pdf') return 'pdf';
+  if (contentType?.startsWith('video/') || FILE_EXT_KIND.video.includes(ext)) return 'video';
+  if (contentType?.startsWith('audio/') || FILE_EXT_KIND.audio.includes(ext)) return 'audio';
+  if (FILE_EXT_KIND.design.includes(ext)) return 'design';
+  if (contentType?.startsWith('text/') || FILE_EXT_KIND.text.includes(ext)) return 'text';
+  if (contentType?.includes('word') || FILE_EXT_KIND.word.includes(ext)) return 'word';
+  if (contentType?.includes('sheet') || contentType?.includes('excel') || FILE_EXT_KIND.sheet.includes(ext)) return 'sheet';
+  if (FILE_EXT_KIND.archive.includes(ext)) return 'archive';
+  return 'other';
+}
+
+function fileIcon(contentType, fileName) {
+  switch (classifyFile(contentType, fileName)) {
+    case 'image':
+      return 'image';
+    case 'pdf':
+      return 'picture_as_pdf';
+    case 'video':
+      return 'videocam';
+    case 'audio':
+      return 'audiotrack';
+    case 'word':
+      return 'description';
+    case 'sheet':
+      return 'table_chart';
+    case 'design':
+      return 'palette';
+    case 'archive':
+      return 'folder_zip';
+    case 'text':
+      return 'article';
+    default:
+      return 'insert_drive_file';
+  }
 }
 
 function totalSize(pages) {
@@ -1227,9 +1323,9 @@ function renderFiles() {
 
   list.innerHTML = items
     .map((f) => {
-      const pages = f.pages || [];
+      const pages = filePages(f);
       const multi = pages.length > 1;
-      const icon = multi ? 'photo_library' : fileIcon(pages[0]?.contentType);
+      const icon = multi ? 'photo_library' : fileIcon(pages[0]?.contentType, pages[0]?.fileName || f.name);
       return `
         <article class="file-card" data-preview-file="${f.id}" tabindex="0" role="button" aria-label="Preview ${escapeHtml(f.name)}">
           <div class="file-card-icon">
@@ -1616,23 +1712,52 @@ function openFileEditForm(file) {
   );
 }
 
-function previewBodyHtml(page, entryName) {
-  if (page.contentType?.startsWith('image/')) {
-    return `<img class="preview-image" src="${escapeHtml(page.downloadURL)}" alt="${escapeHtml(entryName)}" />`;
-  }
-  if (page.contentType === 'application/pdf') {
-    return `<iframe class="preview-frame" src="${escapeHtml(page.downloadURL)}" title="${escapeHtml(entryName)}"></iframe>`;
-  }
+const DESIGN_FILE_LABEL = {
+  psd: 'Photoshop',
+  ai: 'Illustrator',
+  eps: 'Illustrator/EPS',
+  indd: 'InDesign',
+  sketch: 'Sketch',
+  fig: 'Figma',
+  xd: 'Adobe XD'
+};
+
+function fallbackPreviewHtml(icon, message) {
   return `
     <div class="preview-fallback">
-      <span class="material-symbols-outlined" aria-hidden="true">${fileIcon(page.contentType)}</span>
-      <p>Preview isn’t available for this file type.</p>
+      <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
+      <p>${message}</p>
     </div>
   `;
 }
 
+function previewBodyHtml(page, entryName) {
+  const fileName = page.fileName || entryName || '';
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const kind = classifyFile(page.contentType, fileName);
+
+  switch (kind) {
+    case 'image':
+      return `<img class="preview-image" src="${escapeHtml(page.downloadURL)}" alt="${escapeHtml(entryName)}" data-preview-media />`;
+    case 'pdf':
+      return `<iframe class="preview-frame" src="${escapeHtml(page.downloadURL)}" title="${escapeHtml(entryName)}"></iframe>`;
+    case 'video':
+      return `<video class="preview-video" src="${escapeHtml(page.downloadURL)}" controls data-preview-media></video>`;
+    case 'audio':
+      return `<audio class="preview-audio" src="${escapeHtml(page.downloadURL)}" controls data-preview-media></audio>`;
+    case 'design':
+      return fallbackPreviewHtml(
+        'palette',
+        `${DESIGN_FILE_LABEL[ext] || ext.toUpperCase()} files can’t be rendered in a browser — download it to open in the original app.`
+      );
+    default:
+      return fallbackPreviewHtml(fileIcon(page.contentType, fileName), 'Preview isn’t available for this file type — you can still download it below.');
+  }
+}
+
 function openFilePreview(file) {
-  const pages = file.pages && file.pages.length ? file.pages : [{}];
+  const pages = filePages(file);
+  if (!pages.length) pages.push({});
   let index = 0;
 
   const pagerHtml =
@@ -1672,6 +1797,17 @@ function openFilePreview(file) {
         downloadBtn.href = page.downloadURL || '#';
         downloadBtn.setAttribute('download', page.fileName || file.name);
         if (pagerLabel) pagerLabel.textContent = `${index + 1} / ${pages.length}`;
+
+        // Some formats (HEIC, TIFF, etc.) report as image/* but most browsers
+        // can't actually decode them - fall back gracefully instead of
+        // showing a broken-image icon with no explanation.
+        const media = bodyEl.querySelector('img[data-preview-media]');
+        media?.addEventListener('error', () => {
+          bodyEl.innerHTML = fallbackPreviewHtml(
+            'broken_image',
+            'This image format can’t be displayed in the browser — download it to view.'
+          );
+        });
       }
 
       root.querySelector('#preview-close-btn').addEventListener('click', closeModal);
@@ -1697,7 +1833,7 @@ function openFilePreview(file) {
 }
 
 async function deleteFile(file) {
-  const pages = file.pages || [];
+  const pages = filePages(file);
   await Promise.all(
     pages.map((p) =>
       deleteObject(storageRef(storage, p.storagePath)).catch((err) => {

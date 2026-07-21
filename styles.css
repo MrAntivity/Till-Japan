@@ -1,5 +1,5 @@
 :root {
-  color-scheme: dark light;
+  color-scheme: dark;
   --bg: #000000;
   --text: #ffffff;
   --muted: rgba(255, 255, 255, 0.62);
@@ -1157,6 +1157,7 @@ section h2 {
 /* -------------------- light theme -------------------- */
 
 body[data-theme='light'] {
+  color-scheme: light;
   --bg: #f5f1e6;
   --text: #0a0a0a;
   --muted: rgba(10, 10, 10, 0.6);
