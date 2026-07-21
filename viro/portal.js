@@ -407,7 +407,7 @@ function openVaultUnlockPrompt(onSuccess) {
     `
     <h2>Vault locked</h2>
     <form id="vault-unlock-form">
-      <label>Password<input type="password" name="password" required autocomplete="off" /></label>
+      <label>Password<input type="password" name="password" required autocomplete="new-password" data-lpignore="true" data-1p-ignore /></label>
       <p class="form-error" id="vault-unlock-error" hidden>Incorrect password.</p>
       <button class="button primary" type="submit">Unlock</button>
     </form>
@@ -1112,11 +1112,11 @@ function openVaultForm(type, existing = null) {
     `
     <h2>${existing ? 'Edit' : 'Add'} ${def.label}</h2>
     <form id="vault-form">
-      <label>Name<input type="text" name="name" required placeholder="e.g. Netflix" value="${escapeHtml(existing?.name || '')}" /></label>
+      <label>Name<input type="text" name="name" required placeholder="e.g. Netflix" autocomplete="off" value="${escapeHtml(existing?.name || '')}" /></label>
       ${def.fields
         .map(
           (f) =>
-            `<label>${f.label}<input type="${f.type}" name="${f.key}" required placeholder="${f.placeholder || ''}" value="${escapeHtml(existing?.payload?.[f.key] || '')}" /></label>`
+            `<label>${f.label}<input type="${f.type}" name="${f.key}" required placeholder="${f.placeholder || ''}" autocomplete="new-password" data-lpignore="true" data-1p-ignore value="${escapeHtml(existing?.payload?.[f.key] || '')}" /></label>`
         )
         .join('')}
       <button class="button primary" type="submit">Save</button>
@@ -3150,8 +3150,8 @@ async function calendarApiFetch(path, options = {}) {
 
 /* ==================== calendar: weekly view ==================== */
 
-const CALENDAR_START_HOUR = 6;
-const CALENDAR_END_HOUR = 23;
+const CALENDAR_START_HOUR = 0;
+const CALENDAR_END_HOUR = 24;
 const PX_PER_HOUR = 56;
 
 function updateCalendarWeekLabel() {
@@ -3324,7 +3324,9 @@ function renderCalendarGrid() {
     </div>
   `;
 
-  const hourLabels = Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 }, (_, i) => CALENDAR_START_HOUR + i)
+  // One label per hour block (0-23), no trailing fencepost label - keeps
+  // every row consistent instead of an extra boundary line at the bottom.
+  const hourLabels = Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR }, (_, i) => CALENDAR_START_HOUR + i)
     .map((h) => `<div class="calendar-time-label" style="top:${(h - CALENDAR_START_HOUR) * PX_PER_HOUR}px">${formatHourLabel(h)}</div>`)
     .join('');
 
@@ -3343,6 +3345,11 @@ function renderCalendarGrid() {
       ${dayTracksHtml}
     </div>
   `;
+
+  // The full day is a lot of mostly-empty overnight hours - start the
+  // scroll position near the typical start of a day instead of at 12am.
+  const bodyEl = grid.querySelector('.calendar-grid-body');
+  if (bodyEl) bodyEl.scrollTop = 7 * PX_PER_HOUR;
 }
 
 document.getElementById('calendar-prev-week-btn').addEventListener('click', () => {
