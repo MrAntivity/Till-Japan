@@ -2686,18 +2686,76 @@ document.getElementById('editor-print-btn').addEventListener('click', () => {
   window.print();
 });
 
-document.getElementById('editor-download-btn').addEventListener('click', () => {
+// Loaded lazily (only when someone actually downloads a note) rather than on
+// every portal page load - html2canvas does the actual DOM-to-image work,
+// jsPDF lays the result out on real paper-sized pages.
+let pdfLibsPromise = null;
+function loadPdfLibs() {
+  if (window.jspdf?.jsPDF && window.html2canvas) return Promise.resolve();
+  if (pdfLibsPromise) return pdfLibsPromise;
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Could not load PDF library.'));
+      document.head.appendChild(script);
+    });
+  }
+
+  pdfLibsPromise = Promise.all([
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  ]);
+  return pdfLibsPromise;
+}
+
+document.getElementById('editor-download-btn').addEventListener('click', async () => {
   const title = editorTitleInput.value.trim() || 'Untitled note';
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1>${editorSurface.innerHTML}</body></html>`;
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${title.replace(/[^\w\- ]+/g, '').trim() || 'note'}.html`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  editorStatus.textContent = 'Preparing PDF…';
+
+  try {
+    await loadPdfLibs();
+
+    // Render on plain white/black regardless of the site's dark theme - the
+    // on-screen colors aren't meant for paper.
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'background:#fff;color:#000;padding:0;font-family:Georgia,serif;';
+    const titleEl = document.createElement('h1');
+    titleEl.textContent = title;
+    titleEl.style.cssText = 'font-family:Arial,sans-serif;font-size:22px;margin:0 0 18px;color:#000;';
+    const bodyEl = editorSurface.cloneNode(true);
+    bodyEl.style.cssText = 'background:#fff;color:#000;';
+    bodyEl.querySelectorAll('.note-comment').forEach((span) => {
+      span.style.background = 'none';
+      span.style.borderBottom = '1px dotted #999';
+    });
+    wrapper.appendChild(titleEl);
+    wrapper.appendChild(bodyEl);
+
+    const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter' });
+    const margin = 40;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    await new Promise((resolve) => {
+      doc.html(wrapper, {
+        x: margin,
+        y: margin,
+        width: pageWidth - margin * 2,
+        windowWidth: 760,
+        autoPaging: 'text',
+        html2canvas: { logging: false, backgroundColor: '#ffffff' },
+        callback: resolve
+      });
+    });
+
+    doc.save(`${title.replace(/[^\w\- ]+/g, '').trim() || 'note'}.pdf`);
+    editorStatus.textContent = '';
+  } catch (err) {
+    console.error('PDF export failed', err);
+    editorStatus.textContent = err.message || 'Could not create PDF.';
+  }
 });
 
 // AI menu
@@ -3302,6 +3360,45 @@ function eventBlockHtml(e) {
   `;
 }
 
+// .calendar-grid-body scrolls vertically (24 hours doesn't fit), but
+// .calendar-grid-header doesn't - without accounting for the scrollbar's
+// width, the header's day columns end up slightly wider than the body's,
+// so grid lines/events don't line up with the date they're under. Measured
+// once since it's the same for the whole browser/OS, not per-render.
+function getScrollbarWidth() {
+  const outer = document.createElement('div');
+  outer.style.cssText = 'visibility:hidden;overflow:scroll;position:absolute;top:-9999px;width:100px;height:100px;';
+  document.body.appendChild(outer);
+  const inner = document.createElement('div');
+  inner.style.width = '100%';
+  outer.appendChild(inner);
+  const width = outer.offsetWidth - inner.offsetWidth;
+  outer.remove();
+  return width;
+}
+
+const CALENDAR_SCROLLBAR_WIDTH = getScrollbarWidth();
+
+// A red "now" line across today's column, like every other calendar app -
+// removed and redrawn on every grid render, plus nudged forward on an
+// interval so it keeps creeping down even if the grid doesn't re-render.
+function renderCalendarNowLine() {
+  document.querySelectorAll('.calendar-now-line').forEach((el) => el.remove());
+  const now = new Date();
+  const track = document.querySelector(`.calendar-day-track[data-date="${toIsoDate(now)}"]`);
+  if (!track) return;
+
+  const minutesSinceStart = (now.getHours() - CALENDAR_START_HOUR) * 60 + now.getMinutes();
+  const top = (minutesSinceStart / 60) * PX_PER_HOUR;
+  const line = document.createElement('div');
+  line.className = 'calendar-now-line';
+  line.style.top = `${top}px`;
+  line.innerHTML = '<span class="calendar-now-dot"></span>';
+  track.appendChild(line);
+}
+
+window.setInterval(renderCalendarNowLine, 60000);
+
 function renderCalendarGrid() {
   const grid = document.getElementById('calendar-grid');
   const days = Array.from({ length: 7 }, (_, i) => addDays(calendarWeekStart, i));
@@ -3309,7 +3406,7 @@ function renderCalendarGrid() {
   const totalHeight = (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * PX_PER_HOUR;
 
   const headerHtml = `
-    <div class="calendar-grid-header">
+    <div class="calendar-grid-header" style="padding-right:${CALENDAR_SCROLLBAR_WIDTH}px">
       <div></div>
       ${days
         .map(
@@ -3345,6 +3442,8 @@ function renderCalendarGrid() {
       ${dayTracksHtml}
     </div>
   `;
+
+  renderCalendarNowLine();
 
   // The full day is a lot of mostly-empty overnight hours - start the
   // scroll position near the typical start of a day instead of at 12am.

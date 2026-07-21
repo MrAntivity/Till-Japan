@@ -1877,6 +1877,26 @@ body[data-theme='light'] .calendar-day-header.is-today .calendar-day-date {
   background-color: rgba(176, 176, 176, 0.05);
 }
 
+.calendar-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ff4444;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.calendar-now-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff4444;
+}
+
 .calendar-event {
   position: absolute;
   left: 3px;
