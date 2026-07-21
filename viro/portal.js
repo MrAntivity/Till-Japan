@@ -1,4 +1,4 @@
-import { firebaseConfig, PORTAL_ACCOUNT_EMAIL } from './firebase-config.js';
+import { firebaseConfig, PORTAL_ACCOUNT_EMAIL, GOOGLE_CLIENT_ID, GOOGLE_PLACES_API_KEY } from './firebase-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import {
   getAuth,
@@ -34,6 +34,9 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const functions = getFunctions(app);
 const callAiAssist = httpsCallable(functions, 'aiAssist');
+const callGoogleCalendarConnect = httpsCallable(functions, 'googleCalendarConnect');
+const callGoogleCalendarToken = httpsCallable(functions, 'googleCalendarToken');
+const callGoogleCalendarDisconnect = httpsCallable(functions, 'googleCalendarDisconnect');
 
 // Wraps the aiAssist Cloud Function call with a friendlier error for the
 // (very likely, until it's deployed) case where the function doesn't exist
@@ -164,6 +167,15 @@ let currentNoteFolderId = '';
 let currentNoteId = null;
 let aiNoteSearchResultIds = null;
 let aiContactSearchResultIds = null;
+let calendarConnected = false;
+let calendarEmail = '';
+let googleAccessToken = null;
+let googleAccessTokenExpiryMs = 0;
+let calendarWeekStart = startOfWeek(new Date());
+let calendarEvents = [];
+let calendarSummaryCache = null;
+let knownPlaces = [];
+let userGeoCoords = null;
 const unsubscribers = [];
 
 /* ==================== DOM refs ==================== */
@@ -338,6 +350,7 @@ function startPortal() {
   startWeather();
   renderFolderChips();
   renderNoteFolderChips();
+  updateCalendarWeekLabel();
   subscribeCollections();
 }
 
@@ -446,14 +459,14 @@ function closeModal() {
   activePager = null;
 }
 
-function confirmDelete(message, onConfirm) {
+function confirmAction(title, message, confirmLabel, onConfirm) {
   openModal(
     `
-    <h2>Delete?</h2>
+    <h2>${escapeHtml(title)}</h2>
     <p class="confirm-message">${escapeHtml(message)}</p>
     <div class="confirm-actions">
       <button class="button ghost" type="button" id="confirm-cancel-btn">Cancel</button>
-      <button class="button danger" type="button" id="confirm-delete-btn">Delete</button>
+      <button class="button danger" type="button" id="confirm-delete-btn">${escapeHtml(confirmLabel)}</button>
     </div>
   `,
     (root) => {
@@ -464,6 +477,10 @@ function confirmDelete(message, onConfirm) {
       });
     }
   );
+}
+
+function confirmDelete(message, onConfirm) {
+  confirmAction('Delete?', message, 'Delete', onConfirm);
 }
 
 modalClose.addEventListener('click', closeModal);
@@ -558,6 +575,27 @@ function subscribeCollections() {
     onSnapshot(userCollection('notes'), (snap) => {
       notes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderNotes();
+    })
+  );
+
+  unsubscribers.push(
+    onSnapshot(userCollection('knownPlaces'), (snap) => {
+      knownPlaces = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    })
+  );
+
+  // The Cloud Function keeps this token-free "status" doc in sync whenever it connects/
+  // disconnects Google Calendar - the client never reads the doc that actually holds the
+  // refresh token, so this is the only way it knows whether it's connected.
+  unsubscribers.push(
+    onSnapshot(userDoc('googleCalendar', 'status'), (snap) => {
+      const wasConnected = calendarConnected;
+      calendarConnected = !!snap.data()?.connected;
+      calendarEmail = snap.data()?.email || '';
+      updateCalendarConnectionUI();
+      if (calendarConnected && !wasConnected) {
+        loadWeekEvents();
+      }
     })
   );
 }
@@ -2624,6 +2662,43 @@ async function runUniversalCommand(text) {
     return;
   }
 
+  if (result?.intent === 'add' && result.type === 'event' && result.event?.title && result.event?.date) {
+    if (!calendarConnected) {
+      universalSearchStatus.textContent = 'Connect Google Calendar first (in the Calendar tab) to add events this way.';
+      return;
+    }
+
+    universalSearchStatus.textContent = result.event.location ? 'Figuring out the location…' : 'Adding to your calendar…';
+    const location = result.event.location ? await resolveLocation(result.event.location) : '';
+    universalSearchStatus.textContent = 'Adding to your calendar…';
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const body = { summary: result.event.title, location };
+
+    if (result.event.time) {
+      const start = new Date(`${result.event.date}T${result.event.time}:00`);
+      const end = new Date(start.getTime() + (result.event.durationMinutes || 60) * 60000);
+      body.start = { dateTime: `${result.event.date}T${result.event.time}:00`, timeZone: tz };
+      body.end = {
+        dateTime: `${toIsoDate(end)}T${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}:00`,
+        timeZone: tz
+      };
+    } else {
+      body.start = { date: result.event.date };
+      body.end = { date: toIsoDate(addDays(new Date(`${result.event.date}T00:00`), 1)) };
+    }
+
+    try {
+      await calendarApiFetch('/calendars/primary/events', { method: 'POST', body: JSON.stringify(body) });
+      universalSearchStatus.textContent = `Added “${result.event.title}” to your calendar${location ? ` at ${location}` : ''}.`;
+      universalSearchInput.value = '';
+      loadWeekEvents();
+    } catch (err) {
+      universalSearchStatus.textContent = err.message || 'Could not add that to your calendar.';
+    }
+    return;
+  }
+
   if (result?.intent === 'search') {
     await runUniversalSearch(result.query || text);
     return;
@@ -2654,6 +2729,573 @@ universalSearchInput.addEventListener('keydown', (event) => {
     handleUniversalSubmit();
   }
 });
+
+/* ==================== calendar: date helpers ==================== */
+
+function startOfWeek(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function toIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function addMinutesToTimeString(timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
+
+/* ==================== calendar: Google OAuth ==================== */
+
+function updateCalendarConnectionUI() {
+  document.getElementById('calendar-connect-view').hidden = calendarConnected;
+  document.getElementById('calendar-connected-view').hidden = !calendarConnected;
+}
+
+const calendarConnectBtn = document.getElementById('calendar-connect-btn');
+const calendarConnectError = document.getElementById('calendar-connect-error');
+
+calendarConnectBtn.addEventListener('click', () => {
+  calendarConnectError.hidden = true;
+
+  if (typeof google === 'undefined' || !google.accounts?.oauth2) {
+    calendarConnectError.hidden = false;
+    calendarConnectError.textContent = 'Google sign-in script hasn’t loaded yet — check your connection and try again.';
+    return;
+  }
+
+  const codeClient = google.accounts.oauth2.initCodeClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+    ux_mode: 'popup',
+    access_type: 'offline',
+    prompt: 'consent',
+    callback: async (response) => {
+      if (response.error) {
+        calendarConnectError.hidden = false;
+        calendarConnectError.textContent = 'Google sign-in was cancelled or failed. Try again.';
+        return;
+      }
+      calendarConnectBtn.disabled = true;
+      try {
+        await callGoogleCalendarConnect({ code: response.code });
+        // The googleCalendar/status listener flips calendarConnected and loads the week.
+      } catch (err) {
+        calendarConnectError.hidden = false;
+        calendarConnectError.textContent = err.message || 'Could not connect to Google Calendar.';
+      } finally {
+        calendarConnectBtn.disabled = false;
+      }
+    }
+  });
+  codeClient.requestCode();
+});
+
+document.getElementById('calendar-disconnect-btn').addEventListener('click', () => {
+  confirmAction(
+    'Disconnect Google Calendar?',
+    'Your events stay on your real calendar — the portal just stops showing or syncing them until you reconnect.',
+    'Disconnect',
+    async () => {
+      await callGoogleCalendarDisconnect();
+      calendarEvents = [];
+      calendarSummaryCache = null;
+      googleAccessToken = null;
+    }
+  );
+});
+
+async function ensureGoogleAccessToken() {
+  const now = Date.now();
+  if (googleAccessToken && now < googleAccessTokenExpiryMs - 60000) {
+    return googleAccessToken;
+  }
+  const { data } = await callGoogleCalendarToken();
+  googleAccessToken = data.accessToken;
+  googleAccessTokenExpiryMs = now + (data.expiresIn || 3600) * 1000;
+  return googleAccessToken;
+}
+
+async function calendarApiFetch(path, options = {}) {
+  const token = await ensureGoogleAccessToken();
+  const res = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error?.message || 'Google Calendar request failed.');
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/* ==================== calendar: weekly view ==================== */
+
+const CALENDAR_START_HOUR = 6;
+const CALENDAR_END_HOUR = 23;
+const PX_PER_HOUR = 56;
+
+function updateCalendarWeekLabel() {
+  const end = addDays(calendarWeekStart, 6);
+  const startStr = calendarWeekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  document.getElementById('calendar-week-label').textContent = `${startStr} – ${endStr}`;
+}
+
+async function loadWeekEvents() {
+  if (!calendarConnected) return;
+  const weekEnd = addDays(calendarWeekStart, 7);
+  const params = new URLSearchParams({
+    timeMin: calendarWeekStart.toISOString(),
+    timeMax: weekEnd.toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '250'
+  });
+
+  try {
+    const data = await calendarApiFetch(`/calendars/primary/events?${params}`);
+    calendarEvents = data.items || [];
+  } catch (err) {
+    console.error('loadWeekEvents failed', err);
+    calendarEvents = [];
+  }
+  renderCalendarGrid();
+  maybeLoadTodaySummary();
+}
+
+function eventDateIso(e) {
+  if (e.start?.date) return e.start.date;
+  if (e.start?.dateTime) return toIsoDate(new Date(e.start.dateTime));
+  return '';
+}
+
+function formatHourLabel(h) {
+  const period = h < 12 ? 'AM' : 'PM';
+  let hour12 = h % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${hour12} ${period}`;
+}
+
+function minutesSinceStart(dateTimeStr) {
+  const d = new Date(dateTimeStr);
+  return (d.getHours() - CALENDAR_START_HOUR) * 60 + d.getMinutes();
+}
+
+function eventBlockHtml(e) {
+  const isAllDay = !!e.start?.date;
+  let top = 0;
+  let height = PX_PER_HOUR;
+  let timeLabel = 'All day';
+
+  if (!isAllDay) {
+    const totalMin = (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * 60;
+    const startMin = minutesSinceStart(e.start.dateTime);
+    const endMin = e.end?.dateTime ? minutesSinceStart(e.end.dateTime) : startMin + 60;
+    const clampedStart = Math.max(0, Math.min(startMin, totalMin));
+    const clampedEnd = Math.max(clampedStart + 20, Math.min(endMin, totalMin));
+    top = (clampedStart / 60) * PX_PER_HOUR;
+    height = ((clampedEnd - clampedStart) / 60) * PX_PER_HOUR;
+    timeLabel = new Date(e.start.dateTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  return `
+    <button type="button" class="calendar-event" style="top:${top}px;height:${height}px" data-event-id="${e.id}">
+      <span class="calendar-event-time">${escapeHtml(timeLabel)}</span>
+      <span class="calendar-event-title">${escapeHtml(e.summary || 'Untitled event')}</span>
+    </button>
+  `;
+}
+
+function renderCalendarGrid() {
+  const grid = document.getElementById('calendar-grid');
+  const days = Array.from({ length: 7 }, (_, i) => addDays(calendarWeekStart, i));
+  const todayIso = toIsoDate(new Date());
+  const totalHeight = (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * PX_PER_HOUR;
+
+  const headerHtml = `
+    <div class="calendar-grid-header">
+      <div></div>
+      ${days
+        .map(
+          (d) => `
+            <div class="calendar-day-header ${toIsoDate(d) === todayIso ? 'is-today' : ''}">
+              <span class="calendar-day-name">${d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+              <span class="calendar-day-date">${d.getDate()}</span>
+            </div>
+          `
+        )
+        .join('')}
+    </div>
+  `;
+
+  const hourLabels = Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 }, (_, i) => CALENDAR_START_HOUR + i)
+    .map((h) => `<div class="calendar-time-label" style="top:${(h - CALENDAR_START_HOUR) * PX_PER_HOUR}px">${formatHourLabel(h)}</div>`)
+    .join('');
+
+  const dayTracksHtml = days
+    .map((d) => {
+      const iso = toIsoDate(d);
+      const dayEvents = calendarEvents.filter((e) => eventDateIso(e) === iso);
+      return `<div class="calendar-day-track ${iso === todayIso ? 'is-today' : ''}" style="height:${totalHeight}px" data-date="${iso}">${dayEvents.map(eventBlockHtml).join('')}</div>`;
+    })
+    .join('');
+
+  grid.innerHTML = `
+    ${headerHtml}
+    <div class="calendar-grid-body">
+      <div class="calendar-time-gutter" style="height:${totalHeight}px">${hourLabels}</div>
+      ${dayTracksHtml}
+    </div>
+  `;
+}
+
+document.getElementById('calendar-prev-week-btn').addEventListener('click', () => {
+  calendarWeekStart = addDays(calendarWeekStart, -7);
+  updateCalendarWeekLabel();
+  loadWeekEvents();
+});
+
+document.getElementById('calendar-next-week-btn').addEventListener('click', () => {
+  calendarWeekStart = addDays(calendarWeekStart, 7);
+  updateCalendarWeekLabel();
+  loadWeekEvents();
+});
+
+document.getElementById('calendar-today-btn').addEventListener('click', () => {
+  calendarWeekStart = startOfWeek(new Date());
+  updateCalendarWeekLabel();
+  loadWeekEvents();
+});
+
+document.getElementById('calendar-grid').addEventListener('click', (event) => {
+  const eventBtn = event.target.closest('.calendar-event');
+  if (eventBtn) {
+    const ev = calendarEvents.find((e) => e.id === eventBtn.dataset.eventId);
+    if (ev) openEventForm(ev);
+    return;
+  }
+  const track = event.target.closest('.calendar-day-track');
+  if (track) openEventForm(null, new Date(`${track.dataset.date}T00:00`));
+});
+
+document.getElementById('calendar-add-event-btn').addEventListener('click', () => openEventForm());
+
+/* ==================== calendar: AI daily summary ==================== */
+
+function updateOverviewScheduleCard(summary) {
+  document.getElementById('overview-schedule-text').textContent = summary;
+}
+
+async function refreshCalendarSummary() {
+  const todayIso = toIsoDate(new Date());
+  const todaysEvents = calendarEvents
+    .filter((e) => eventDateIso(e) === todayIso)
+    .map((e) => ({
+      title: e.summary || 'Untitled event',
+      start: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '',
+      end: e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''
+    }));
+
+  const banner = document.getElementById('calendar-summary-banner');
+  const textEl = document.getElementById('calendar-summary-text');
+  banner.hidden = false;
+  textEl.textContent = 'Thinking…';
+
+  try {
+    const summary = (await requestAi('calendar_summary', '', { events: todaysEvents })) || 'Nothing on your calendar today.';
+    textEl.textContent = summary;
+    calendarSummaryCache = summary;
+    updateOverviewScheduleCard(summary);
+  } catch (err) {
+    textEl.textContent = err.message || 'Could not summarize your day.';
+  }
+}
+
+function maybeLoadTodaySummary() {
+  const isCurrentWeek = toIsoDate(calendarWeekStart) === toIsoDate(startOfWeek(new Date()));
+  const banner = document.getElementById('calendar-summary-banner');
+  if (!isCurrentWeek) {
+    banner.hidden = true;
+    return;
+  }
+  if (calendarSummaryCache) {
+    banner.hidden = false;
+    document.getElementById('calendar-summary-text').textContent = calendarSummaryCache;
+    return;
+  }
+  refreshCalendarSummary();
+}
+
+/* ==================== calendar: location memory + Places search ==================== */
+
+function normalizePlaceText(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function matchKnownPlace(rawText) {
+  const norm = normalizePlaceText(rawText);
+  if (!norm) return null;
+  const matches = knownPlaces.filter((p) => {
+    const nameNorm = normalizePlaceText(p.name);
+    const aliasHit = (p.aliases || []).some((a) => {
+      const aNorm = normalizePlaceText(a);
+      return aNorm === norm || aNorm.includes(norm) || norm.includes(aNorm);
+    });
+    return aliasHit || nameNorm.includes(norm) || norm.includes(nameNorm);
+  });
+  if (!matches.length) return null;
+  matches.sort((a, b) => (b.lastUsed?.toMillis?.() || 0) - (a.lastUsed?.toMillis?.() || 0));
+  return matches[0];
+}
+
+function ensureUserLocation() {
+  if (userGeoCoords) return Promise.resolve(userGeoCoords);
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation not supported.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        userGeoCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        resolve(userGeoCoords);
+      },
+      (err) => reject(err),
+      { timeout: 8000 }
+    );
+  });
+}
+
+async function placesTextSearch(query, coords) {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.id'
+    },
+    body: JSON.stringify({
+      textQuery: query,
+      locationBias: { circle: { center: { latitude: coords.lat, longitude: coords.lng }, radius: 8000 } },
+      maxResultCount: 5
+    })
+  });
+  if (!res.ok) throw new Error('Location search failed.');
+  const data = await res.json();
+  return (data.places || []).map((p) => ({
+    name: p.displayName?.text || query,
+    address: p.formattedAddress || '',
+    placeId: p.id,
+    lat: p.location?.latitude,
+    lng: p.location?.longitude
+  }));
+}
+
+function pickPlace(results, rawText) {
+  return new Promise((resolve) => {
+    openModal(
+      `
+      <h2>Which “${escapeHtml(rawText)}”?</h2>
+      <div class="place-picker-list">
+        ${results
+          .map(
+            (r, i) => `
+              <button type="button" class="place-picker-option" data-index="${i}">
+                <span class="place-picker-option-name">${escapeHtml(r.name)}</span>
+                <span class="place-picker-option-address">${escapeHtml(r.address)}</span>
+              </button>
+            `
+          )
+          .join('')}
+      </div>
+      <button class="button ghost" type="button" id="place-picker-skip-btn" style="margin-top:14px;">Just use “${escapeHtml(rawText)}” as typed</button>
+    `,
+      (root) => {
+        root.querySelectorAll('.place-picker-option').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            closeModal();
+            resolve(results[Number(btn.dataset.index)]);
+          });
+        });
+        root.querySelector('#place-picker-skip-btn').addEventListener('click', () => {
+          closeModal();
+          resolve(null);
+        });
+      }
+    );
+  });
+}
+
+async function rememberPlace(rawText, place) {
+  const alias = rawText.trim().toLowerCase();
+  const existing = knownPlaces.find((p) => p.placeId === place.placeId);
+  if (existing) {
+    const aliases = new Set(existing.aliases || []);
+    aliases.add(alias);
+    await updateDoc(userDoc('knownPlaces', existing.id), { aliases: Array.from(aliases), lastUsed: serverTimestamp() });
+  } else {
+    await addDoc(userCollection('knownPlaces'), {
+      placeId: place.placeId,
+      name: place.name,
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+      aliases: [alias],
+      lastUsed: serverTimestamp()
+    });
+  }
+}
+
+// The core of "remember which McDonald's I mean": check places used before first, and only
+// fall back to a live nearby search (with a picker) when nothing matches. Returns a resolved
+// address string, or the original text if search fails/isn't available/the user skips.
+async function resolveLocation(rawText) {
+  if (!rawText.trim()) return '';
+
+  const remembered = matchKnownPlace(rawText);
+  if (remembered) return remembered.address;
+
+  let coords;
+  try {
+    coords = await ensureUserLocation();
+  } catch (err) {
+    return rawText;
+  }
+
+  let results = [];
+  try {
+    results = await placesTextSearch(rawText, coords);
+  } catch (err) {
+    return rawText;
+  }
+  if (!results.length) return rawText;
+
+  const chosen = await pickPlace(results, rawText);
+  if (!chosen) return rawText;
+
+  await rememberPlace(rawText, chosen);
+  return chosen.address;
+}
+
+/* ==================== calendar: add/edit event ==================== */
+
+function openEventForm(existing = null, presetDate = null) {
+  const isEdit = !!existing;
+  const startDate = existing?.start?.dateTime ? new Date(existing.start.dateTime) : presetDate || new Date();
+  const endDate = existing?.end?.dateTime ? new Date(existing.end.dateTime) : null;
+  const isAllDay = isEdit && !!existing?.start?.date;
+
+  const startTimeVal = existing?.start?.dateTime
+    ? `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`
+    : '';
+  const endTimeVal = endDate ? `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}` : '';
+
+  openModal(
+    `
+    <h2>${isEdit ? 'Edit' : 'Add'} event</h2>
+    <form id="event-form">
+      <label>Title<input type="text" name="title" required value="${escapeHtml(existing?.summary || '')}" /></label>
+      <label>Date<input type="date" name="date" required value="${toIsoDate(startDate)}" /></label>
+      <div class="two-col">
+        <label>Start time (optional)<input type="time" name="startTime" value="${isAllDay ? '' : startTimeVal}" /></label>
+        <label>End time<input type="time" name="endTime" value="${isAllDay ? '' : endTimeVal}" /></label>
+      </div>
+      <label>Location (optional)
+        <div class="location-search-row">
+          <input type="text" name="location" value="${escapeHtml(existing?.location || '')}" placeholder="e.g. McDonald’s" />
+          <button type="button" class="icon-btn" id="event-location-search-btn" aria-label="Find location" title="Find location">
+            <span class="material-symbols-outlined">place</span>
+          </button>
+        </div>
+      </label>
+      <label>Description (optional)<textarea name="description" rows="2">${escapeHtml(existing?.description || '')}</textarea></label>
+      <p class="form-error" id="event-form-error" hidden></p>
+      <button class="button primary" type="submit">${isEdit ? 'Save' : 'Add to calendar'}</button>
+      ${isEdit ? '<button class="button ghost" type="button" id="event-delete-btn">Delete event</button>' : ''}
+    </form>
+  `,
+    (root) => {
+      const errorEl = root.querySelector('#event-form-error');
+
+      root.querySelector('#event-location-search-btn').addEventListener('click', async (clickEvent) => {
+        const btn = clickEvent.currentTarget;
+        const input = root.querySelector('[name="location"]');
+        const raw = input.value.trim();
+        if (!raw) return;
+        btn.disabled = true;
+        try {
+          input.value = await resolveLocation(raw);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      root.querySelector('#event-form').addEventListener('submit', async (submitEvent) => {
+        submitEvent.preventDefault();
+        errorEl.hidden = true;
+        const form = new FormData(submitEvent.target);
+        const date = form.get('date');
+        const startTime = form.get('startTime');
+        const endTime = form.get('endTime');
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        const body = {
+          summary: form.get('title').trim(),
+          location: form.get('location').trim(),
+          description: form.get('description').trim()
+        };
+
+        if (startTime) {
+          body.start = { dateTime: `${date}T${startTime}:00`, timeZone: tz };
+          body.end = { dateTime: `${date}T${endTime || addMinutesToTimeString(startTime, 60)}:00`, timeZone: tz };
+        } else {
+          body.start = { date };
+          body.end = { date: toIsoDate(addDays(new Date(`${date}T00:00`), 1)) };
+        }
+
+        const submitBtn = root.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        try {
+          if (isEdit) {
+            await calendarApiFetch(`/calendars/primary/events/${existing.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+          } else {
+            await calendarApiFetch('/calendars/primary/events', { method: 'POST', body: JSON.stringify(body) });
+          }
+          closeModal();
+          loadWeekEvents();
+        } catch (err) {
+          errorEl.hidden = false;
+          errorEl.textContent = err.message || 'Could not save this event.';
+          submitBtn.disabled = false;
+        }
+      });
+
+      root.querySelector('#event-delete-btn')?.addEventListener('click', () => {
+        confirmDelete(`Delete “${existing.summary}”? This removes it from your real Google Calendar too.`, async () => {
+          await calendarApiFetch(`/calendars/primary/events/${existing.id}`, { method: 'DELETE' });
+          loadWeekEvents();
+        });
+      });
+    }
+  );
+}
 
 /* ==================== overview: clock ==================== */
 

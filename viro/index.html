@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="../styles.css" />
     <link rel="stylesheet" href="portal.css" />
     <link rel="icon" type="image/svg+xml" href="../assets/avatar.svg" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body data-portal="true">
     <div class="glow"></div>
@@ -69,6 +70,7 @@
           <button type="button" data-tab="vault">Vault</button>
           <button type="button" data-tab="files">Files</button>
           <button type="button" data-tab="drive">Drive</button>
+          <button type="button" data-tab="calendar">Calendar</button>
           <button type="button" data-tab="contacts">Contacts</button>
         </nav>
         <button class="button ghost" type="button" id="logout-btn">Log out</button>
@@ -123,6 +125,15 @@
               <ul class="entry-list entry-list--compact" id="overview-todos">
                 <li class="entry-empty">Nothing due soon.</li>
               </ul>
+            </div>
+            <div class="overview-card" id="overview-schedule-card">
+              <div class="overview-card-header">
+                <h2>Today’s schedule</h2>
+                <a data-goto-tab="calendar" href="#">View all</a>
+              </div>
+              <p class="overview-schedule-text" id="overview-schedule-text">
+                <a data-goto-tab="calendar" href="#">Connect your Google Calendar</a> to see an AI summary of your day here.
+              </p>
             </div>
           </div>
         </section>
@@ -279,6 +290,49 @@
 
             <div class="editor-surface" id="editor-surface" contenteditable="true" spellcheck="true"></div>
             <p class="editor-status" id="editor-status"></p>
+          </div>
+        </section>
+
+        <!-- ---------- CALENDAR ---------- -->
+        <section class="portal-tab" id="tab-calendar" data-tab-panel="calendar" hidden>
+          <div id="calendar-connect-view">
+            <div class="calendar-connect-card">
+              <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+              <h2>Connect Google Calendar</h2>
+              <p>See your week at a glance, get an AI summary of your day, and add events here that sync straight to your real calendar.</p>
+              <button class="button primary" id="calendar-connect-btn" type="button">Connect Google Calendar</button>
+              <p class="form-error" id="calendar-connect-error" hidden></p>
+            </div>
+          </div>
+
+          <div id="calendar-connected-view" hidden>
+            <div class="tab-toolbar">
+              <h2>Calendar</h2>
+              <div class="tab-toolbar-actions">
+                <button class="icon-btn" id="calendar-prev-week-btn" type="button" aria-label="Previous week">
+                  <span class="material-symbols-outlined">chevron_left</span>
+                </button>
+                <button class="button ghost small" id="calendar-today-btn" type="button">Today</button>
+                <button class="icon-btn" id="calendar-next-week-btn" type="button" aria-label="Next week">
+                  <span class="material-symbols-outlined">chevron_right</span>
+                </button>
+                <button class="button primary" id="calendar-add-event-btn" type="button">+ Add event</button>
+                <button class="icon-btn" id="calendar-disconnect-btn" type="button" aria-label="Disconnect Google Calendar" title="Disconnect Google Calendar">
+                  <span class="material-symbols-outlined">link_off</span>
+                </button>
+              </div>
+            </div>
+
+            <p class="calendar-week-label" id="calendar-week-label"></p>
+
+            <div class="calendar-summary-banner" id="calendar-summary-banner" hidden>
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+              <p id="calendar-summary-text"></p>
+            </div>
+
+            <div class="calendar-grid-wrap" id="calendar-grid-wrap">
+              <div class="calendar-grid" id="calendar-grid"></div>
+            </div>
           </div>
         </section>
 

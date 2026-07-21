@@ -13,3 +13,13 @@ export const firebaseConfig = {
 // The fixed internal account used to sign in with just the PIN. It does not need to be a
 // real, reachable email address — Firebase Authentication just needs it as a unique identifier.
 export const PORTAL_ACCOUNT_EMAIL = 'aiden@viro.local';
+
+// Google Cloud Console → APIs & Services → Credentials.
+// OAuth 2.0 Client ID (Web application) used to connect Google Calendar. Public/safe like the
+// Firebase config above — it only identifies the app; it can't authenticate anything by itself.
+export const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com';
+
+// Places API (New) key, used client-side to search for a location by name (e.g. "mcdonalds")
+// when adding a calendar event. Restrict this key to your site's HTTP referrer in Google Cloud
+// Console — Google explicitly designs Places/Maps keys to be used this way in browser apps.
+export const GOOGLE_PLACES_API_KEY = 'YOUR_GOOGLE_PLACES_API_KEY';
