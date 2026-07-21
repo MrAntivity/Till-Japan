@@ -3076,7 +3076,9 @@ calendarConnectBtn.addEventListener('click', () => {
 
   const codeClient = google.accounts.oauth2.initCodeClient({
     client_id: GOOGLE_CLIENT_ID,
-    scope: 'https://www.googleapis.com/auth/calendar.events',
+    // Full calendar scope (not just calendar.events) so the portal can list
+    // and read every calendar you have, not only the primary one.
+    scope: 'https://www.googleapis.com/auth/calendar',
     ux_mode: 'popup',
     access_type: 'offline',
     prompt: 'consent',
@@ -3157,6 +3159,15 @@ function updateCalendarWeekLabel() {
   document.getElementById('calendar-week-label').textContent = `${startStr} – ${endStr}`;
 }
 
+// Google Calendar accounts are usually made up of several calendars (your
+// own, school/work, shared ones, etc.) merged together in the Google
+// Calendar UI - the events API only returns one calendar at a time, so this
+// lists every calendar you have and fetches each one's events in parallel.
+async function fetchVisibleCalendars() {
+  const data = await calendarApiFetch('/users/me/calendarList?minAccessRole=freeBusyReader');
+  return (data.items || []).filter((cal) => cal.selected !== false);
+}
+
 async function loadWeekEvents() {
   if (!calendarConnected) return;
   const weekEnd = addDays(calendarWeekStart, 7);
@@ -3169,8 +3180,18 @@ async function loadWeekEvents() {
   });
 
   try {
-    const data = await calendarApiFetch(`/calendars/primary/events?${params}`);
-    calendarEvents = data.items || [];
+    const calendars = await fetchVisibleCalendars();
+    const results = await Promise.all(
+      calendars.map((cal) =>
+        calendarApiFetch(`/calendars/${encodeURIComponent(cal.id)}/events?${params}`)
+          .then((data) => (data.items || []).map((e) => ({ ...e, calendarId: cal.id, calendarColor: cal.backgroundColor })))
+          .catch((err) => {
+            console.error(`loadWeekEvents failed for calendar ${cal.id}`, err);
+            return [];
+          })
+      )
+    );
+    calendarEvents = results.flat();
   } catch (err) {
     console.error('loadWeekEvents failed', err);
     calendarEvents = [];
@@ -3197,6 +3218,19 @@ function minutesSinceStart(dateTimeStr) {
   return (d.getHours() - CALENDAR_START_HOUR) * 60 + d.getMinutes();
 }
 
+// Google's per-calendar colors span the whole palette, unlike the site's own
+// muted default - pick readable text per event instead of assuming dark text
+// always works.
+function readableTextColor(hex) {
+  const c = /^#?([0-9a-f]{6})$/i.exec(hex || '')?.[1];
+  if (!c) return null;
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#0a0a0a' : '#ffffff';
+}
+
 function eventBlockHtml(e) {
   const isAllDay = !!e.start?.date;
   let top = 0;
@@ -3214,8 +3248,10 @@ function eventBlockHtml(e) {
     timeLabel = new Date(e.start.dateTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   }
 
+  const colorStyle = e.calendarColor ? `background:${e.calendarColor};color:${readableTextColor(e.calendarColor) || '#0a0a0a'};` : '';
+
   return `
-    <button type="button" class="calendar-event" style="top:${top}px;height:${height}px" data-event-id="${e.id}">
+    <button type="button" class="calendar-event" style="top:${top}px;height:${height}px;${colorStyle}" data-event-id="${e.id}">
       <span class="calendar-event-time">${escapeHtml(timeLabel)}</span>
       <span class="calendar-event-title">${escapeHtml(e.summary || 'Untitled event')}</span>
     </button>
@@ -3573,7 +3609,8 @@ function openEventForm(existing = null, presetDate = null) {
         submitBtn.disabled = true;
         try {
           if (isEdit) {
-            await calendarApiFetch(`/calendars/primary/events/${existing.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+            const calendarId = encodeURIComponent(existing.calendarId || 'primary');
+            await calendarApiFetch(`/calendars/${calendarId}/events/${existing.id}`, { method: 'PATCH', body: JSON.stringify(body) });
           } else {
             await calendarApiFetch('/calendars/primary/events', { method: 'POST', body: JSON.stringify(body) });
           }
@@ -3588,7 +3625,8 @@ function openEventForm(existing = null, presetDate = null) {
 
       root.querySelector('#event-delete-btn')?.addEventListener('click', () => {
         confirmDelete(`Delete “${existing.summary}”? This removes it from your real Google Calendar too.`, async () => {
-          await calendarApiFetch(`/calendars/primary/events/${existing.id}`, { method: 'DELETE' });
+          const calendarId = encodeURIComponent(existing.calendarId || 'primary');
+          await calendarApiFetch(`/calendars/${calendarId}/events/${existing.id}`, { method: 'DELETE' });
           loadWeekEvents();
         });
       });
