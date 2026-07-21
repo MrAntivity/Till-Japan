@@ -17,9 +17,9 @@ export const PORTAL_ACCOUNT_EMAIL = 'aiden@viro.local';
 // Google Cloud Console → APIs & Services → Credentials.
 // OAuth 2.0 Client ID (Web application) used to connect Google Calendar. Public/safe like the
 // Firebase config above — it only identifies the app; it can't authenticate anything by itself.
-export const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com';
+export const GOOGLE_CLIENT_ID = '688963596071-s758lk93ekbl21n394j2l0g99qiovt8j.apps.googleusercontent.com';
 
 // Places API (New) key, used client-side to search for a location by name (e.g. "mcdonalds")
 // when adding a calendar event. Restrict this key to your site's HTTP referrer in Google Cloud
 // Console — Google explicitly designs Places/Maps keys to be used this way in browser apps.
-export const GOOGLE_PLACES_API_KEY = 'YOUR_GOOGLE_PLACES_API_KEY';
+export const GOOGLE_PLACES_API_KEY = 'AIzaSyD--5Z_tlPw63H6QCUU0_gABh8Q4MmiHLU';

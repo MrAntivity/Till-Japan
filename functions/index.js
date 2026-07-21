@@ -13,7 +13,7 @@ const googleClientSecret = defineSecret('GOOGLE_CLIENT_SECRET');
 // Same public value as GOOGLE_CLIENT_ID in viro/firebase-config.js - the client ID isn't a
 // secret (it just identifies the app to Google), so it's hardcoded here rather than requiring
 // another `firebase functions:secrets:set` step.
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '688963596071-s758lk93ekbl21n394j2l0g99qiovt8j.apps.googleusercontent.com';
 
 const MODEL = 'gpt-4o-mini';
 const MAX_INPUT_CHARS = 12000; // keeps requests (and cost) bounded
