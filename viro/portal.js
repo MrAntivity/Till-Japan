@@ -350,7 +350,6 @@ function enterPortal() {
 function startPortal() {
   startClock();
   startWeather();
-  renderFolderChips();
   renderNoteFolderChips();
   updateCalendarWeekLabel();
   subscribeCollections();
@@ -550,7 +549,6 @@ function subscribeCollections() {
       folders = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      renderFolderChips();
       renderFiles();
     })
   );
@@ -1386,6 +1384,26 @@ function folderName(folderId) {
   return f ? f.name : '';
 }
 
+// Walks parentId links up to the root, returning [grandparent, parent, folder].
+function folderPath(folderId) {
+  const path = [];
+  let cur = folderId;
+  let guard = 0;
+  while (cur && guard++ < 50) {
+    const f = folders.find((x) => x.id === cur);
+    if (!f) break;
+    path.unshift(f);
+    cur = f.parentId || null;
+  }
+  return path;
+}
+
+function folderPathLabel(folderId) {
+  return folderPath(folderId)
+    .map((f) => f.name)
+    .join(' / ');
+}
+
 // Files uploaded before the multi-page feature existed stored their storage
 // path/URL/contentType directly on the file document instead of inside a
 // `pages` array. This normalizes either shape into a pages array so every
@@ -1476,22 +1494,53 @@ function formatBytes(bytes) {
   return `${value.toFixed(value < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-function renderFolderChips() {
-  const container = document.getElementById('folder-chips');
-  const chips = [
-    { id: '', name: 'All files' },
-    { id: 'unfiled', name: 'Unfiled' },
-    ...folders
-  ];
-  container.innerHTML = chips
-    .map(
-      (f) => `
-        <button type="button" class="folder-chip ${currentFolderId === f.id ? 'is-active' : ''}" data-folder-id="${f.id}">
-          <span class="material-symbols-outlined" aria-hidden="true">${f.id ? 'folder' : 'apps'}</span>
-          ${escapeHtml(f.name)}
+// Real, nested folders: currentFolderId is "the folder you're standing in"
+// (null = root), not a filter chip. A breadcrumb shows the path back to
+// root, and a folder grid above the file grid shows subfolders of wherever
+// you currently are - open one to navigate into it, same as any file browser.
+function renderFolderBreadcrumb() {
+  const container = document.getElementById('folder-breadcrumb');
+  const crumbs = [{ id: '', name: 'All Files' }, ...folderPath(currentFolderId)];
+  container.innerHTML = crumbs
+    .map((c, i) => {
+      const isLast = i === crumbs.length - 1;
+      return `
+        <button type="button" class="breadcrumb-item ${isLast ? 'is-current' : ''}" data-folder-id="${c.id}" ${isLast ? 'disabled' : ''}>${escapeHtml(c.name)}</button>
+        ${!isLast ? '<span class="material-symbols-outlined breadcrumb-sep" aria-hidden="true">chevron_right</span>' : ''}
+      `;
+    })
+    .join('');
+}
+
+function visibleSubfolders() {
+  const query = (document.getElementById('file-search').value || '').toLowerCase();
+  if (aiSearchResultIds || query) return [];
+  return folders
+    .filter((f) => (f.parentId || null) === (currentFolderId || null))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderFolderGrid() {
+  const container = document.getElementById('folder-grid');
+  const subfolders = visibleSubfolders();
+  container.hidden = !subfolders.length;
+  if (!subfolders.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = subfolders
+    .map((f) => {
+      const itemCount =
+        files.filter((file) => (file.folderId || null) === f.id).length +
+        folders.filter((sf) => (sf.parentId || null) === f.id).length;
+      return `
+        <button type="button" class="folder-card" data-open-folder="${f.id}">
+          <span class="material-symbols-outlined folder-card-icon" aria-hidden="true">folder</span>
+          <span class="folder-card-name">${escapeHtml(f.name)}</span>
+          <span class="folder-card-count">${itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty'}</span>
         </button>
-      `
-    )
+      `;
+    })
     .join('');
 }
 
@@ -1502,14 +1551,14 @@ function visibleFiles() {
   }
 
   const query = (document.getElementById('file-search').value || '').toLowerCase();
-  return files
-    .filter((f) => {
-      if (currentFolderId === 'unfiled' && f.folderId) return false;
-      if (currentFolderId && currentFolderId !== 'unfiled' && f.folderId !== currentFolderId) return false;
-      if (!query) return true;
-      return f.name.toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  if (query) {
+    // Searching flattens across every folder, like any file browser's search.
+    return files
+      .filter((f) => f.name.toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return files.filter((f) => (f.folderId || null) === (currentFolderId || null)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function fileUploadedLabel(f) {
@@ -1518,11 +1567,14 @@ function fileUploadedLabel(f) {
 }
 
 function renderFiles() {
+  renderFolderBreadcrumb();
+  renderFolderGrid();
+
   const list = document.getElementById('file-list');
   const items = visibleFiles();
 
   if (!items.length) {
-    list.innerHTML = '<p class="entry-empty">No files found.</p>';
+    list.innerHTML = visibleSubfolders().length ? '' : '<p class="entry-empty">No files found.</p>';
     return;
   }
 
@@ -1538,7 +1590,7 @@ function renderFiles() {
             ${multi ? `<span class="file-card-pages-badge">${pages.length}</span>` : ''}
           </div>
           <div class="file-card-name">${escapeHtml(f.name)}</div>
-          <p class="file-card-meta">${formatBytes(totalSize(pages))}${multi ? ` · ${pages.length} pages` : ''}${f.folderId ? ` · ${escapeHtml(folderName(f.folderId))}` : ''}</p>
+          <p class="file-card-meta">${formatBytes(totalSize(pages))}${multi ? ` · ${pages.length} pages` : ''}${f.folderId ? ` · ${escapeHtml(folderPathLabel(f.folderId))}` : ''}</p>
           ${fileUploadedLabel(f) ? `<p class="file-card-date">Uploaded ${fileUploadedLabel(f)}</p>` : ''}
           ${f.description ? `<p class="file-card-desc">${escapeHtml(f.description)}</p>` : ''}
           <div class="file-card-actions">
@@ -1585,12 +1637,21 @@ fileSearchInput.addEventListener('input', () => {
   renderFiles();
 });
 
-document.getElementById('folder-chips').addEventListener('click', (event) => {
-  const chip = event.target.closest('[data-folder-id]');
-  if (!chip) return;
+document.getElementById('folder-breadcrumb').addEventListener('click', (event) => {
+  const crumb = event.target.closest('[data-folder-id]');
+  if (!crumb) return;
   clearAiSearch();
-  currentFolderId = chip.dataset.folderId;
-  renderFolderChips();
+  fileSearchInput.value = '';
+  currentFolderId = crumb.dataset.folderId || null;
+  renderFiles();
+});
+
+document.getElementById('folder-grid').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-open-folder]');
+  if (!card) return;
+  clearAiSearch();
+  fileSearchInput.value = '';
+  currentFolderId = card.dataset.openFolder;
   renderFiles();
 });
 
@@ -1611,7 +1672,7 @@ aiSearchBtn.addEventListener('click', async () => {
       id: f.id,
       type: 'file',
       title: f.name,
-      subtitle: [f.description, f.folderId ? folderName(f.folderId) : ''].filter(Boolean).join(' · '),
+      subtitle: [f.description, f.folderId ? folderPathLabel(f.folderId) : ''].filter(Boolean).join(' · '),
       date: fileUploadedLabel(f)
     }));
     const result = await requestAi('smart_search', query, { items });
@@ -1634,9 +1695,11 @@ aiSearchBtn.addEventListener('click', async () => {
 });
 
 document.getElementById('add-folder-btn').addEventListener('click', () => {
+  const parentLabel = currentFolderId ? folderPathLabel(currentFolderId) : 'All Files';
   openModal(
     `
     <h2>New folder</h2>
+    <p class="confirm-message">Inside “${escapeHtml(parentLabel)}”</p>
     <form id="folder-form">
       <label>Folder name<input type="text" name="name" required /></label>
       <button class="button primary" type="submit">Create</button>
@@ -1648,6 +1711,7 @@ document.getElementById('add-folder-btn').addEventListener('click', () => {
         const form = new FormData(event.target);
         await addDoc(userCollection('folders'), {
           name: form.get('name').trim(),
+          parentId: currentFolderId || null,
           createdAt: serverTimestamp()
         });
         closeModal();
@@ -1656,12 +1720,21 @@ document.getElementById('add-folder-btn').addEventListener('click', () => {
   );
 });
 
+// Indented so nesting is visible when picking a folder for a file, e.g.
+// "— Homework" appearing under its parent "School".
 function folderOptionsHtml(selectedId) {
+  function optionsFor(parentId, depth) {
+    return folders
+      .filter((f) => (f.parentId || null) === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap((f) => [
+        `<option value="${f.id}" ${selectedId === f.id ? 'selected' : ''}>${'—'.repeat(depth)} ${escapeHtml(f.name)}</option>`,
+        ...optionsFor(f.id, depth + 1)
+      ]);
+  }
   return `
     <option value="" ${!selectedId ? 'selected' : ''}>No folder</option>
-    ${folders
-      .map((f) => `<option value="${f.id}" ${selectedId === f.id ? 'selected' : ''}>${escapeHtml(f.name)}</option>`)
-      .join('')}
+    ${optionsFor(null, 1).join('')}
   `;
 }
 
@@ -1728,7 +1801,7 @@ function openUploadModal(initialFiles) {
       </div>
       <label id="upload-name-row">Name<input type="text" name="name" /></label>
       <label>Description (optional)<textarea name="description" rows="2"></textarea></label>
-      <label>Folder<select name="folderId">${folderOptionsHtml('')}</select></label>
+      <label>Folder<select name="folderId">${folderOptionsHtml(currentFolderId || '')}</select></label>
       <div class="upload-progress" id="upload-progress" hidden>
         <div class="upload-progress-bar" id="upload-progress-bar"></div>
       </div>

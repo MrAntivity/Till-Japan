@@ -975,6 +975,90 @@ body[data-theme='light'] .button.danger {
   border-color: rgba(176, 176, 176, 0.45);
 }
 
+.folder-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.breadcrumb-item {
+  border: none;
+  background: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.breadcrumb-item:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(176, 176, 176, 0.1);
+}
+
+.breadcrumb-item.is-current {
+  color: var(--text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.breadcrumb-sep {
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.folder-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.folder-card:hover {
+  border-color: rgba(176, 176, 176, 0.45);
+  transform: translateY(-2px);
+}
+
+.folder-card-icon {
+  font-size: 28px;
+  color: var(--red);
+  flex-shrink: 0;
+}
+
+.folder-card-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-card-count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .file-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
