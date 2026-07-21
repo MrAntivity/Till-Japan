@@ -2736,8 +2736,15 @@ aiMenuDropdown.querySelectorAll('[data-ai-task]').forEach((btn) => {
           document.getSelection().collapseToEnd();
         }
         document.execCommand('insertText', false, ' ' + result);
-      } else if (task === 'format' && !hasSelection) {
-        editorSurface.innerHTML = result;
+      } else if (task === 'format') {
+        // "format" returns real HTML (headings/lists/etc), unlike the other
+        // tasks which return plain text - insertText would show the raw tags
+        // as literal text instead of rendering them.
+        if (hasSelection) {
+          document.execCommand('insertHTML', false, result);
+        } else {
+          editorSurface.innerHTML = result;
+        }
       } else if (hasSelection) {
         document.execCommand('insertText', false, result);
       } else {
