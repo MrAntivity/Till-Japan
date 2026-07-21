@@ -351,13 +351,15 @@ body[data-portal='true'] {
   font-weight: 700;
 }
 
-.overview-weather {
+.overview-weather,
+.overview-clock {
   position: relative;
   cursor: pointer;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
-.overview-weather:hover {
+.overview-weather:hover,
+.overview-clock:hover {
   border-color: rgba(176, 176, 176, 0.4);
   transform: translateY(-2px);
 }
@@ -893,6 +895,42 @@ body[data-theme='light'] .button.danger {
 
 .weather-week-rain.is-notable {
   color: var(--red);
+}
+
+.world-clock-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.world-clock-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.world-clock-city {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.world-clock-time {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.world-clock-date {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .modal.modal--wide {

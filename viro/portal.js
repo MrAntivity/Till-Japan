@@ -2979,15 +2979,16 @@ async function runUniversalCommand(text) {
 
   if (result?.intent === 'add' && result.type === 'todo' && result.todo?.title) {
     const list = ['school', 'personal', 'business'].includes(result.todo.list) ? result.todo.list : 'personal';
+    const title = toTitleCase(result.todo.title);
     await addDoc(userCollection('todos'), {
       category: list,
-      title: result.todo.title,
+      title,
       deadline: result.todo.deadline || null,
       description: '',
       completed: false,
       createdAt: serverTimestamp()
     });
-    universalSearchStatus.textContent = `Added “${result.todo.title}” to ${CATEGORY_LABEL[list]} to-dos${
+    universalSearchStatus.textContent = `Added “${title}” to ${CATEGORY_LABEL[list]} to-dos${
       result.todo.deadline ? ` — due ${new Date(result.todo.deadline + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''
     }.`;
     universalSearchInput.value = '';
@@ -3891,6 +3892,56 @@ function startClock() {
   window.setInterval(tick, 15000);
 }
 
+const WORLD_CLOCK_ZONES = [
+  { label: 'Los Angeles', timeZone: 'America/Los_Angeles' },
+  { label: 'Boston', timeZone: 'America/New_York' },
+  { label: 'Japan', timeZone: 'Asia/Tokyo' },
+  { label: 'China', timeZone: 'Asia/Shanghai' },
+  { label: 'UK', timeZone: 'Europe/London' }
+];
+
+function worldClockCardsHtml() {
+  const now = new Date();
+  return WORLD_CLOCK_ZONES.map((z) => {
+    const time = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: z.timeZone });
+    const date = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: z.timeZone });
+    return `
+      <div class="world-clock-card">
+        <p class="world-clock-city">${escapeHtml(z.label)}</p>
+        <p class="world-clock-time">${time}</p>
+        <p class="world-clock-date">${date}</p>
+      </div>
+    `;
+  }).join('');
+}
+
+function openWorldClockModal() {
+  openModal(
+    `
+    <h2>World clock</h2>
+    <div class="world-clock-grid" id="world-clock-grid">${worldClockCardsHtml()}</div>
+  `,
+    (root) => {
+      const grid = root.querySelector('#world-clock-grid');
+      const interval = window.setInterval(() => {
+        if (!document.body.contains(grid)) {
+          window.clearInterval(interval);
+          return;
+        }
+        grid.innerHTML = worldClockCardsHtml();
+      }, 15000);
+    }
+  );
+}
+
+const overviewClockEl = document.getElementById('overview-clock');
+overviewClockEl.addEventListener('click', openWorldClockModal);
+overviewClockEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  openWorldClockModal();
+});
+
 /* ==================== overview: weather ==================== */
 
 const WEATHER_CODES = {
@@ -4065,6 +4116,13 @@ overviewWeatherEl.addEventListener('keydown', (event) => {
 });
 
 /* ==================== utils ==================== */
+
+// AI-generated to-do titles come back lowercase/inconsistent more often
+// than not - normalize to Title Case client-side rather than relying on the
+// model to always format it the way we want.
+function toTitleCase(str) {
+  return String(str || '').replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
 
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, (c) => ({
