@@ -174,6 +174,8 @@ let googleAccessTokenExpiryMs = 0;
 let calendarWeekStart = startOfWeek(new Date());
 let calendarEvents = [];
 let calendarSummaryCache = null;
+let calendarList = [];
+let hiddenCalendarIds = new Set(JSON.parse(localStorage.getItem('viro-hidden-calendars') || '[]'));
 let knownPlaces = [];
 let userGeoCoords = null;
 const unsubscribers = [];
@@ -3168,6 +3170,45 @@ async function fetchVisibleCalendars() {
   return (data.items || []).filter((cal) => cal.selected !== false);
 }
 
+// Which calendars to actually draw in the grid is a display-only choice, so
+// it's just a client-side filter over already-fetched events (no re-fetch
+// needed) - persisted to localStorage so the choice sticks between visits.
+function renderCalendarFilterChips() {
+  const container = document.getElementById('calendar-filter-chips');
+  if (calendarList.length < 2) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = calendarList
+    .map(
+      (cal) => `
+        <button
+          type="button"
+          class="calendar-filter-chip ${hiddenCalendarIds.has(cal.id) ? 'is-hidden' : ''}"
+          data-calendar-id="${escapeHtml(cal.id)}"
+        >
+          <span class="calendar-filter-chip-dot" style="background:${cal.backgroundColor || 'var(--red)'}"></span>
+          ${escapeHtml(cal.summaryOverride || cal.summary)}
+        </button>
+      `
+    )
+    .join('');
+}
+
+document.getElementById('calendar-filter-chips').addEventListener('click', (event) => {
+  const chip = event.target.closest('[data-calendar-id]');
+  if (!chip) return;
+  const id = chip.dataset.calendarId;
+  if (hiddenCalendarIds.has(id)) {
+    hiddenCalendarIds.delete(id);
+  } else {
+    hiddenCalendarIds.add(id);
+  }
+  localStorage.setItem('viro-hidden-calendars', JSON.stringify(Array.from(hiddenCalendarIds)));
+  chip.classList.toggle('is-hidden');
+  renderCalendarGrid();
+});
+
 async function loadWeekEvents() {
   if (!calendarConnected) return;
   const weekEnd = addDays(calendarWeekStart, 7);
@@ -3181,6 +3222,9 @@ async function loadWeekEvents() {
 
   try {
     const calendars = await fetchVisibleCalendars();
+    calendarList = calendars;
+    renderCalendarFilterChips();
+
     const results = await Promise.all(
       calendars.map((cal) =>
         calendarApiFetch(`/calendars/${encodeURIComponent(cal.id)}/events?${params}`)
@@ -3287,7 +3331,7 @@ function renderCalendarGrid() {
   const dayTracksHtml = days
     .map((d) => {
       const iso = toIsoDate(d);
-      const dayEvents = calendarEvents.filter((e) => eventDateIso(e) === iso);
+      const dayEvents = calendarEvents.filter((e) => eventDateIso(e) === iso && !hiddenCalendarIds.has(e.calendarId));
       return `<div class="calendar-day-track ${iso === todayIso ? 'is-today' : ''}" style="height:${totalHeight}px" data-date="${iso}">${dayEvents.map(eventBlockHtml).join('')}</div>`;
     })
     .join('');
@@ -3322,6 +3366,10 @@ document.getElementById('calendar-today-btn').addEventListener('click', () => {
 document.getElementById('calendar-grid').addEventListener('click', (event) => {
   const eventBtn = event.target.closest('.calendar-event');
   if (eventBtn) {
+    if (eventBtn.dataset.justDragged === 'true') {
+      delete eventBtn.dataset.justDragged;
+      return;
+    }
     const ev = calendarEvents.find((e) => e.id === eventBtn.dataset.eventId);
     if (ev) openEventForm(ev);
     return;
@@ -3331,6 +3379,91 @@ document.getElementById('calendar-grid').addEventListener('click', (event) => {
 });
 
 document.getElementById('calendar-add-event-btn').addEventListener('click', () => openEventForm());
+
+function formatLocalDateTime(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function trackIndexAtX(clientX, tracks) {
+  for (let i = 0; i < tracks.length; i++) {
+    const rect = tracks[i].getBoundingClientRect();
+    if (clientX >= rect.left && clientX < rect.right) return i;
+  }
+  return null;
+}
+
+// Drag a timed event to reschedule it - snaps to 15-minute increments
+// vertically and whole days horizontally. All-day events (no clock time)
+// are skipped since there's no time axis to drag them along.
+document.getElementById('calendar-grid').addEventListener('mousedown', (mousedownEvent) => {
+  if (mousedownEvent.button !== 0) return;
+  const btn = mousedownEvent.target.closest('.calendar-event');
+  if (!btn) return;
+
+  const ev = calendarEvents.find((e) => e.id === btn.dataset.eventId);
+  if (!ev || !ev.start?.dateTime) return;
+
+  const startX = mousedownEvent.clientX;
+  const startY = mousedownEvent.clientY;
+  const tracks = Array.from(document.querySelectorAll('.calendar-day-track'));
+  const startTrackIndex = tracks.indexOf(btn.closest('.calendar-day-track'));
+  let moved = false;
+
+  function onMove(moveEvent) {
+    const dx = moveEvent.clientX - startX;
+    const dy = moveEvent.clientY - startY;
+    if (!moved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      moved = true;
+      btn.classList.add('is-dragging');
+    }
+    if (!moved) return;
+    btn.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  async function onUp(upEvent) {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (!moved) return;
+
+    btn.dataset.justDragged = 'true';
+    btn.classList.remove('is-dragging');
+    btn.style.transform = '';
+
+    const dy = upEvent.clientY - startY;
+    const snapPx = (PX_PER_HOUR / 60) * 15;
+    const minuteDelta = Math.round(dy / snapPx) * 15;
+    const endTrackIndex = trackIndexAtX(upEvent.clientX, tracks);
+    const dayDelta = endTrackIndex === null ? 0 : endTrackIndex - startTrackIndex;
+
+    if (minuteDelta === 0 && dayDelta === 0) return;
+
+    const origStart = new Date(ev.start.dateTime);
+    const origEnd = new Date(ev.end.dateTime);
+    const durationMs = origEnd - origStart;
+    const newStart = new Date(origStart.getTime() + dayDelta * 86400000 + minuteDelta * 60000);
+    const newEnd = new Date(newStart.getTime() + durationMs);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const calendarId = encodeURIComponent(ev.calendarId || 'primary');
+
+    try {
+      await calendarApiFetch(`/calendars/${calendarId}/events/${ev.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          start: { dateTime: formatLocalDateTime(newStart), timeZone: tz },
+          end: { dateTime: formatLocalDateTime(newEnd), timeZone: tz }
+        })
+      });
+      loadWeekEvents();
+    } catch (err) {
+      console.error('Failed to move event', err);
+      renderCalendarGrid();
+    }
+  }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
 
 /* ==================== calendar: AI daily summary ==================== */
 

@@ -1887,13 +1887,14 @@ body[data-theme='light'] .calendar-day-header.is-today .calendar-day-date {
   background: var(--red);
   color: #0a0a0a;
   text-align: left;
-  cursor: pointer;
+  cursor: grab;
   border: none;
   font: inherit;
   display: grid;
   gap: 1px;
   align-content: start;
   transition: filter 0.15s ease;
+  touch-action: none;
 }
 
 body[data-theme='light'] .calendar-event {
@@ -1902,6 +1903,51 @@ body[data-theme='light'] .calendar-event {
 
 .calendar-event:hover {
   filter: brightness(1.12);
+}
+
+.calendar-event.is-dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+  transition: none;
+}
+
+.calendar-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 20px;
+}
+
+.calendar-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.calendar-filter-chip:hover {
+  border-color: rgba(176, 176, 176, 0.5);
+}
+
+.calendar-filter-chip.is-hidden {
+  opacity: 0.4;
+}
+
+.calendar-filter-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .calendar-event-time {
