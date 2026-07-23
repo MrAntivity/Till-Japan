@@ -498,6 +498,115 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowRight') activePager.next();
 });
 
+/* ==================== context menu (right-click / long-press) ==================== */
+// Card actions (rename, delete, ...) live behind a right-click on desktop or
+// a long-press on touch, rather than always-visible icon buttons.
+const contextMenuEl = document.createElement('div');
+contextMenuEl.className = 'context-menu';
+contextMenuEl.hidden = true;
+document.body.appendChild(contextMenuEl);
+
+function closeContextMenu() {
+  contextMenuEl.hidden = true;
+  contextMenuEl.innerHTML = '';
+}
+
+function openContextMenu(x, y, items) {
+  contextMenuEl.innerHTML = items
+    .map(
+      (item, i) => `
+        <button type="button" class="context-menu-item${item.danger ? ' is-danger' : ''}" data-index="${i}">
+          <span class="material-symbols-outlined" aria-hidden="true">${item.icon}</span>${escapeHtml(item.label)}
+        </button>
+      `
+    )
+    .join('');
+  contextMenuEl.hidden = false;
+  const rect = contextMenuEl.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 8;
+  const maxY = window.innerHeight - rect.height - 8;
+  contextMenuEl.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
+  contextMenuEl.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
+  contextMenuEl.querySelectorAll('[data-index]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      closeContextMenu();
+      items[Number(btn.dataset.index)].onClick();
+    });
+  });
+}
+
+document.addEventListener('click', (event) => {
+  if (!contextMenuEl.hidden && !contextMenuEl.contains(event.target)) closeContextMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeContextMenu();
+});
+document.addEventListener('scroll', closeContextMenu, true);
+window.addEventListener('resize', closeContextMenu);
+
+// getItems(card) is called lazily, right when the menu is about to open, so
+// callers can look up fresh data (e.g. current file/folder name) by id.
+function wireCardContextMenu(container, cardSelector, getItems) {
+  container.addEventListener('contextmenu', (event) => {
+    const card = event.target.closest(cardSelector);
+    if (!card) return;
+    event.preventDefault();
+    openContextMenu(event.clientX, event.clientY, getItems(card));
+  });
+
+  let pressTimer = null;
+  let startX = 0;
+  let startY = 0;
+  let longPressFired = false;
+
+  container.addEventListener(
+    'touchstart',
+    (event) => {
+      const card = event.target.closest(cardSelector);
+      if (!card) return;
+      longPressFired = false;
+      const touch = event.touches[0];
+      startX = touch.clientX;
+      startY = touch.clientY;
+      pressTimer = window.setTimeout(() => {
+        longPressFired = true;
+        pressTimer = null;
+        if (navigator.vibrate) navigator.vibrate(15);
+        openContextMenu(startX, startY, getItems(card));
+      }, 550);
+    },
+    { passive: true }
+  );
+
+  container.addEventListener(
+    'touchmove',
+    (event) => {
+      if (!pressTimer) return;
+      const touch = event.touches[0];
+      if (Math.abs(touch.clientX - startX) > 10 || Math.abs(touch.clientY - startY) > 10) {
+        window.clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    },
+    { passive: true }
+  );
+
+  container.addEventListener(
+    'touchend',
+    (event) => {
+      if (pressTimer) {
+        window.clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      if (longPressFired) {
+        event.preventDefault();
+        longPressFired = false;
+      }
+    },
+    { passive: false }
+  );
+}
+
 /* ==================== firestore helpers ==================== */
 
 function userCollection(name) {
@@ -1536,14 +1645,6 @@ function renderFolderGrid() {
           <span class="material-symbols-outlined folder-card-icon" aria-hidden="true">folder</span>
           <span class="folder-card-name">${escapeHtml(f.name)}</span>
           <span class="folder-card-count">${itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty'}</span>
-          <span class="folder-card-actions">
-            <button type="button" class="icon-btn icon-btn--sm" data-edit-folder="${f.id}" aria-label="Rename folder">
-              <span class="material-symbols-outlined">edit</span>
-            </button>
-            <button type="button" class="icon-btn icon-btn--sm" data-delete-folder="${f.id}" aria-label="Delete folder">
-              <span class="material-symbols-outlined">delete</span>
-            </button>
-          </span>
         </article>
       `;
     })
@@ -1599,21 +1700,15 @@ function renderFiles() {
           <p class="file-card-meta">${formatBytes(totalSize(pages))}${multi ? ` · ${pages.length} pages` : ''}${f.folderId ? ` · ${escapeHtml(folderPathLabel(f.folderId))}` : ''}</p>
           ${fileUploadedLabel(f) ? `<p class="file-card-date">Uploaded ${fileUploadedLabel(f)}</p>` : ''}
           ${f.description ? `<p class="file-card-desc">${escapeHtml(f.description)}</p>` : ''}
-          <div class="file-card-actions">
-            ${
-              multi
-                ? ''
-                : `<a class="icon-btn icon-btn--sm" href="${escapeHtml(pages[0]?.downloadURL || '')}" target="_blank" rel="noopener" download="${escapeHtml(pages[0]?.fileName || f.name)}" aria-label="Download">
+          ${
+            multi
+              ? ''
+              : `<div class="file-card-actions">
+                  <a class="icon-btn icon-btn--sm" href="${escapeHtml(pages[0]?.downloadURL || '')}" target="_blank" rel="noopener" download="${escapeHtml(pages[0]?.fileName || f.name)}" aria-label="Download">
                     <span class="material-symbols-outlined">download</span>
-                  </a>`
-            }
-            <button type="button" class="icon-btn icon-btn--sm" data-edit-file="${f.id}" aria-label="Edit">
-              <span class="material-symbols-outlined">edit</span>
-            </button>
-            <button type="button" class="icon-btn icon-btn--sm" data-delete-file="${f.id}" aria-label="Delete">
-              <span class="material-symbols-outlined">delete</span>
-            </button>
-          </div>
+                  </a>
+                </div>`
+          }
         </article>
       `;
     })
@@ -1653,24 +1748,6 @@ document.getElementById('folder-breadcrumb').addEventListener('click', (event) =
 });
 
 document.getElementById('folder-grid').addEventListener('click', (event) => {
-  const deleteBtn = event.target.closest('[data-delete-folder]');
-  if (deleteBtn) {
-    const folder = folders.find((f) => f.id === deleteBtn.dataset.deleteFolder);
-    if (folder) {
-      const count = folderContentsCount(folder.id);
-      const warning = count ? ` and its ${count} item${count === 1 ? '' : 's'}` : '';
-      confirmDelete(`Delete “${folder.name}”${warning}? This can’t be undone.`, () => deleteFolderRecursive(folder.id));
-    }
-    return;
-  }
-
-  const editBtn = event.target.closest('[data-edit-folder]');
-  if (editBtn) {
-    const folder = folders.find((f) => f.id === editBtn.dataset.editFolder);
-    if (folder) openFolderEditForm(folder);
-    return;
-  }
-
   const card = event.target.closest('[data-open-folder]');
   if (!card) return;
   clearAiSearch();
@@ -1681,7 +1758,6 @@ document.getElementById('folder-grid').addEventListener('click', (event) => {
 
 document.getElementById('folder-grid').addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
-  if (event.target.closest('[data-edit-folder], [data-delete-folder]')) return;
   const card = event.target.closest('[data-open-folder]');
   if (!card) return;
   event.preventDefault();
@@ -1689,6 +1765,27 @@ document.getElementById('folder-grid').addEventListener('keydown', (event) => {
   fileSearchInput.value = '';
   currentFolderId = card.dataset.openFolder;
   renderFiles();
+});
+
+function folderContextMenuItems(folder) {
+  return [
+    { label: 'Rename', icon: 'edit', onClick: () => openFolderEditForm(folder) },
+    {
+      label: 'Delete',
+      icon: 'delete',
+      danger: true,
+      onClick: () => {
+        const count = folderContentsCount(folder.id);
+        const warning = count ? ` and its ${count} item${count === 1 ? '' : 's'}` : '';
+        confirmDelete(`Delete “${folder.name}”${warning}? This can’t be undone.`, () => deleteFolderRecursive(folder.id));
+      }
+    }
+  ];
+}
+
+wireCardContextMenu(document.getElementById('folder-grid'), '[data-open-folder]', (card) => {
+  const folder = folders.find((f) => f.id === card.dataset.openFolder);
+  return folder ? folderContextMenuItems(folder) : [];
 });
 
 // Drag a file or folder card onto a folder card or a breadcrumb crumb to
@@ -1744,18 +1841,21 @@ document.addEventListener('dragend', () => {
   document.querySelectorAll('.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
   document.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
   dragPayload = null;
+  noteDragPayload = null;
 });
 
-function wireDropTarget(container, selector, getTargetId) {
+// Generic so both Files (folders/files) and Drive (note folders/notes) can
+// share the same drop-target wiring with their own canDrop/onDrop/afterDrop.
+function wireDropTarget(container, selector, getTargetId, canDrop, onDrop, afterDrop) {
   container.addEventListener('dragover', (event) => {
     const target = event.target.closest(selector);
-    if (!target || !canDropOn(getTargetId(target))) return;
+    if (!target || !canDrop(getTargetId(target))) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   });
   container.addEventListener('dragenter', (event) => {
     const target = event.target.closest(selector);
-    if (!target || !canDropOn(getTargetId(target))) return;
+    if (!target || !canDrop(getTargetId(target))) return;
     target.classList.add('is-drop-target');
   });
   container.addEventListener('dragleave', (event) => {
@@ -1765,16 +1865,16 @@ function wireDropTarget(container, selector, getTargetId) {
   });
   container.addEventListener('drop', async (event) => {
     const target = event.target.closest(selector);
-    if (!target || !canDropOn(getTargetId(target))) return;
+    if (!target || !canDrop(getTargetId(target))) return;
     event.preventDefault();
     target.classList.remove('is-drop-target');
-    await dropOn(getTargetId(target));
-    renderFiles();
+    await onDrop(getTargetId(target));
+    afterDrop();
   });
 }
 
-wireDropTarget(document.getElementById('folder-grid'), '[data-open-folder]', (el) => el.dataset.openFolder);
-wireDropTarget(document.getElementById('folder-breadcrumb'), '[data-folder-id]', (el) => el.dataset.folderId || null);
+wireDropTarget(document.getElementById('folder-grid'), '[data-open-folder]', (el) => el.dataset.openFolder, canDropOn, dropOn, renderFiles);
+wireDropTarget(document.getElementById('folder-breadcrumb'), '[data-folder-id]', (el) => el.dataset.folderId || null, canDropOn, dropOn, renderFiles);
 
 aiSearchBtn.addEventListener('click', async () => {
   const query = fileSearchInput.value.trim();
@@ -2296,22 +2396,6 @@ function openFolderEditForm(folder) {
 }
 
 document.getElementById('file-list').addEventListener('click', (event) => {
-  const deleteBtn = event.target.closest('[data-delete-file]');
-  if (deleteBtn) {
-    const file = files.find((f) => f.id === deleteBtn.dataset.deleteFile);
-    if (file) {
-      confirmDelete(`Delete “${file.name}”? This can’t be undone.`, () => deleteFile(file));
-    }
-    return;
-  }
-
-  const editBtn = event.target.closest('[data-edit-file]');
-  if (editBtn) {
-    const file = files.find((f) => f.id === editBtn.dataset.editFile);
-    if (file) openFileEditForm(file);
-    return;
-  }
-
   if (event.target.closest('a[href]')) {
     // Let the browser handle the download link natively.
     return;
@@ -2322,6 +2406,20 @@ document.getElementById('file-list').addEventListener('click', (event) => {
     const file = files.find((f) => f.id === card.dataset.previewFile);
     if (file) openFilePreview(file);
   }
+});
+
+wireCardContextMenu(document.getElementById('file-list'), '[data-preview-file]', (card) => {
+  const file = files.find((f) => f.id === card.dataset.previewFile);
+  if (!file) return [];
+  return [
+    { label: 'Edit', icon: 'edit', onClick: () => openFileEditForm(file) },
+    {
+      label: 'Delete',
+      icon: 'delete',
+      danger: true,
+      onClick: () => confirmDelete(`Delete “${file.name}”? This can’t be undone.`, () => deleteFile(file))
+    }
+  ];
 });
 
 document.getElementById('file-list').addEventListener('keydown', (event) => {
@@ -2406,11 +2504,11 @@ function renderNoteFolderGrid() {
         notes.filter((n) => (n.folderId || null) === f.id).length +
         noteFolders.filter((sf) => (sf.parentId || null) === f.id).length;
       return `
-        <button type="button" class="folder-card" data-open-note-folder="${f.id}">
+        <article class="folder-card" data-open-note-folder="${f.id}" draggable="true" tabindex="0" role="button" aria-label="Open ${escapeHtml(f.name)}">
           <span class="material-symbols-outlined folder-card-icon" aria-hidden="true">folder</span>
           <span class="folder-card-name">${escapeHtml(f.name)}</span>
           <span class="folder-card-count">${itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty'}</span>
-        </button>
+        </article>
       `;
     })
     .join('');
@@ -2468,6 +2566,149 @@ document.getElementById('note-folder-grid').addEventListener('click', (event) =>
   currentNoteFolderId = card.dataset.openNoteFolder;
   renderNotes();
 });
+
+document.getElementById('note-folder-grid').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const card = event.target.closest('[data-open-note-folder]');
+  if (!card) return;
+  event.preventDefault();
+  clearAiNoteSearch();
+  noteSearchInput.value = '';
+  currentNoteFolderId = card.dataset.openNoteFolder;
+  renderNotes();
+});
+
+function noteFolderDescendantIds(folderId) {
+  const ids = new Set();
+  const queue = [folderId];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const f of noteFolders) {
+      if ((f.parentId || null) === id && !ids.has(f.id)) {
+        ids.add(f.id);
+        queue.push(f.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function noteFolderContentsCount(folderId) {
+  const allFolderIds = new Set([folderId, ...noteFolderDescendantIds(folderId)]);
+  const noteCount = notes.filter((n) => allFolderIds.has(n.folderId || null)).length;
+  return allFolderIds.size - 1 + noteCount;
+}
+
+async function deleteNoteFolderRecursive(folderId) {
+  for (const cf of noteFolders.filter((f) => (f.parentId || null) === folderId)) {
+    await deleteNoteFolderRecursive(cf.id);
+  }
+  for (const note of notes.filter((n) => (n.folderId || null) === folderId)) {
+    await deleteDoc(userDoc('notes', note.id));
+  }
+  await deleteDoc(userDoc('noteFolders', folderId));
+}
+
+function openNoteFolderEditForm(folder) {
+  openModal(
+    `
+    <h2>Rename folder</h2>
+    <form id="note-folder-edit-form">
+      <label>Folder name<input type="text" name="name" required value="${escapeHtml(folder.name)}" /></label>
+      <button class="button primary" type="submit">Save</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#note-folder-edit-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        await updateDoc(userDoc('noteFolders', folder.id), { name: form.get('name').trim() });
+        closeModal();
+      });
+    }
+  );
+}
+
+wireCardContextMenu(document.getElementById('note-folder-grid'), '[data-open-note-folder]', (card) => {
+  const folder = noteFolders.find((f) => f.id === card.dataset.openNoteFolder);
+  if (!folder) return [];
+  return [
+    { label: 'Rename', icon: 'edit', onClick: () => openNoteFolderEditForm(folder) },
+    {
+      label: 'Delete',
+      icon: 'delete',
+      danger: true,
+      onClick: () => {
+        const count = noteFolderContentsCount(folder.id);
+        const warning = count ? ` and its ${count} item${count === 1 ? '' : 's'}` : '';
+        confirmDelete(`Delete “${folder.name}”${warning}? This can’t be undone.`, () => deleteNoteFolderRecursive(folder.id));
+      }
+    }
+  ];
+});
+
+// Drag a note or note folder card onto a folder card or a breadcrumb crumb
+// to move it there, mirroring the Files tab's drag-and-drop.
+let noteDragPayload = null;
+
+function canDropOnNote(targetFolderId) {
+  if (!noteDragPayload) return false;
+  const normalizedTarget = targetFolderId || null;
+  if (noteDragPayload.type === 'note') {
+    const note = notes.find((n) => n.id === noteDragPayload.id);
+    return !!note && (note.folderId || null) !== normalizedTarget;
+  }
+  if (noteDragPayload.id === normalizedTarget) return false;
+  const folder = noteFolders.find((f) => f.id === noteDragPayload.id);
+  if (!folder || (folder.parentId || null) === normalizedTarget) return false;
+  if (normalizedTarget && noteFolderDescendantIds(noteDragPayload.id).has(normalizedTarget)) return false;
+  return true;
+}
+
+async function dropOnNote(targetFolderId) {
+  if (!canDropOnNote(targetFolderId)) return;
+  const normalizedTarget = targetFolderId || null;
+  if (noteDragPayload.type === 'note') {
+    await updateDoc(userDoc('notes', noteDragPayload.id), { folderId: normalizedTarget });
+  } else {
+    await updateDoc(userDoc('noteFolders', noteDragPayload.id), { parentId: normalizedTarget });
+  }
+}
+
+document.getElementById('note-list').addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-open-note]');
+  if (!card) return;
+  noteDragPayload = { type: 'note', id: card.dataset.openNote };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', noteDragPayload.id);
+  card.classList.add('is-dragging');
+});
+
+document.getElementById('note-folder-grid').addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-open-note-folder]');
+  if (!card) return;
+  noteDragPayload = { type: 'folder', id: card.dataset.openNoteFolder };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', noteDragPayload.id);
+  card.classList.add('is-dragging');
+});
+
+wireDropTarget(
+  document.getElementById('note-folder-grid'),
+  '[data-open-note-folder]',
+  (el) => el.dataset.openNoteFolder,
+  canDropOnNote,
+  dropOnNote,
+  renderNotes
+);
+wireDropTarget(
+  document.getElementById('note-folder-breadcrumb'),
+  '[data-note-folder-id]',
+  (el) => el.dataset.noteFolderId || null,
+  canDropOnNote,
+  dropOnNote,
+  renderNotes
+);
 
 aiNoteSearchBtn.addEventListener('click', async () => {
   const query = noteSearchInput.value.trim();
@@ -2576,7 +2817,7 @@ function renderNotes() {
         ? n.updatedAt.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : '';
       return `
-        <article class="note-card" data-open-note="${n.id}" tabindex="0" role="button" aria-label="Open ${escapeHtml(n.title || 'Untitled note')}">
+        <article class="note-card" data-open-note="${n.id}" draggable="true" tabindex="0" role="button" aria-label="Open ${escapeHtml(n.title || 'Untitled note')}">
           <div class="note-card-title">${escapeHtml(n.title || 'Untitled note')}</div>
           <p class="note-card-snippet">${escapeHtml(snippet) || '<em>Empty note</em>'}</p>
           <p class="note-card-meta">${updated ? `Updated ${updated}` : ''}${n.folderId ? ` · ${escapeHtml(noteFolderPathLabel(n.folderId))}` : ''}</p>
@@ -2605,6 +2846,20 @@ document.getElementById('note-list').addEventListener('keydown', (event) => {
   event.preventDefault();
   const note = notes.find((n) => n.id === card.dataset.openNote);
   if (note) openNoteEditor(note);
+});
+
+wireCardContextMenu(document.getElementById('note-list'), '[data-open-note]', (card) => {
+  const note = notes.find((n) => n.id === card.dataset.openNote);
+  if (!note) return [];
+  return [
+    {
+      label: 'Delete',
+      icon: 'delete',
+      danger: true,
+      onClick: () =>
+        confirmDelete(`Delete “${note.title || 'this note'}”? This can’t be undone.`, () => deleteDoc(userDoc('notes', note.id)))
+    }
+  ];
 });
 
 document.getElementById('add-note-btn').addEventListener('click', async () => {
