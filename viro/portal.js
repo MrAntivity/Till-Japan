@@ -1532,11 +1532,19 @@ function renderFolderGrid() {
         files.filter((file) => (file.folderId || null) === f.id).length +
         folders.filter((sf) => (sf.parentId || null) === f.id).length;
       return `
-        <button type="button" class="folder-card" data-open-folder="${f.id}">
+        <article class="folder-card" data-open-folder="${f.id}" draggable="true" tabindex="0" role="button" aria-label="Open ${escapeHtml(f.name)}">
           <span class="material-symbols-outlined folder-card-icon" aria-hidden="true">folder</span>
           <span class="folder-card-name">${escapeHtml(f.name)}</span>
           <span class="folder-card-count">${itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty'}</span>
-        </button>
+          <span class="folder-card-actions">
+            <button type="button" class="icon-btn icon-btn--sm" data-edit-folder="${f.id}" aria-label="Rename folder">
+              <span class="material-symbols-outlined">edit</span>
+            </button>
+            <button type="button" class="icon-btn icon-btn--sm" data-delete-folder="${f.id}" aria-label="Delete folder">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </span>
+        </article>
       `;
     })
     .join('');
@@ -1582,7 +1590,7 @@ function renderFiles() {
       const multi = pages.length > 1;
       const icon = multi ? 'photo_library' : fileIcon(pages[0]?.contentType, pages[0]?.fileName || f.name);
       return `
-        <article class="file-card" data-preview-file="${f.id}" tabindex="0" role="button" aria-label="Preview ${escapeHtml(f.name)}">
+        <article class="file-card" data-preview-file="${f.id}" draggable="true" tabindex="0" role="button" aria-label="Preview ${escapeHtml(f.name)}">
           <div class="file-card-icon">
             <span class="material-symbols-outlined">${icon}</span>
             ${multi ? `<span class="file-card-pages-badge">${pages.length}</span>` : ''}
@@ -1645,6 +1653,24 @@ document.getElementById('folder-breadcrumb').addEventListener('click', (event) =
 });
 
 document.getElementById('folder-grid').addEventListener('click', (event) => {
+  const deleteBtn = event.target.closest('[data-delete-folder]');
+  if (deleteBtn) {
+    const folder = folders.find((f) => f.id === deleteBtn.dataset.deleteFolder);
+    if (folder) {
+      const count = folderContentsCount(folder.id);
+      const warning = count ? ` and its ${count} item${count === 1 ? '' : 's'}` : '';
+      confirmDelete(`Delete “${folder.name}”${warning}? This can’t be undone.`, () => deleteFolderRecursive(folder.id));
+    }
+    return;
+  }
+
+  const editBtn = event.target.closest('[data-edit-folder]');
+  if (editBtn) {
+    const folder = folders.find((f) => f.id === editBtn.dataset.editFolder);
+    if (folder) openFolderEditForm(folder);
+    return;
+  }
+
   const card = event.target.closest('[data-open-folder]');
   if (!card) return;
   clearAiSearch();
@@ -1652,6 +1678,103 @@ document.getElementById('folder-grid').addEventListener('click', (event) => {
   currentFolderId = card.dataset.openFolder;
   renderFiles();
 });
+
+document.getElementById('folder-grid').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  if (event.target.closest('[data-edit-folder], [data-delete-folder]')) return;
+  const card = event.target.closest('[data-open-folder]');
+  if (!card) return;
+  event.preventDefault();
+  clearAiSearch();
+  fileSearchInput.value = '';
+  currentFolderId = card.dataset.openFolder;
+  renderFiles();
+});
+
+// Drag a file or folder card onto a folder card or a breadcrumb crumb to
+// move it there, same as any file browser. dragPayload (set only by our own
+// dragstart handlers below) doubles as the signal that a drag is an internal
+// reorder rather than an OS file drop, so it never fights the upload-overlay
+// drag handlers on portalEl, which only react when dataTransfer carries 'Files'.
+let dragPayload = null;
+
+function canDropOn(targetFolderId) {
+  if (!dragPayload) return false;
+  const normalizedTarget = targetFolderId || null;
+  if (dragPayload.type === 'file') {
+    const file = files.find((f) => f.id === dragPayload.id);
+    return !!file && (file.folderId || null) !== normalizedTarget;
+  }
+  if (dragPayload.id === normalizedTarget) return false;
+  const folder = folders.find((f) => f.id === dragPayload.id);
+  if (!folder || (folder.parentId || null) === normalizedTarget) return false;
+  if (normalizedTarget && folderDescendantIds(dragPayload.id).has(normalizedTarget)) return false;
+  return true;
+}
+
+async function dropOn(targetFolderId) {
+  if (!canDropOn(targetFolderId)) return;
+  const normalizedTarget = targetFolderId || null;
+  if (dragPayload.type === 'file') {
+    await updateDoc(userDoc('files', dragPayload.id), { folderId: normalizedTarget });
+  } else {
+    await updateDoc(userDoc('folders', dragPayload.id), { parentId: normalizedTarget });
+  }
+}
+
+document.getElementById('file-list').addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-preview-file]');
+  if (!card) return;
+  dragPayload = { type: 'file', id: card.dataset.previewFile };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', dragPayload.id);
+  card.classList.add('is-dragging');
+});
+
+document.getElementById('folder-grid').addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-open-folder]');
+  if (!card) return;
+  dragPayload = { type: 'folder', id: card.dataset.openFolder };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', dragPayload.id);
+  card.classList.add('is-dragging');
+});
+
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
+  document.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+  dragPayload = null;
+});
+
+function wireDropTarget(container, selector, getTargetId) {
+  container.addEventListener('dragover', (event) => {
+    const target = event.target.closest(selector);
+    if (!target || !canDropOn(getTargetId(target))) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  });
+  container.addEventListener('dragenter', (event) => {
+    const target = event.target.closest(selector);
+    if (!target || !canDropOn(getTargetId(target))) return;
+    target.classList.add('is-drop-target');
+  });
+  container.addEventListener('dragleave', (event) => {
+    const target = event.target.closest(selector);
+    if (!target || target.contains(event.relatedTarget)) return;
+    target.classList.remove('is-drop-target');
+  });
+  container.addEventListener('drop', async (event) => {
+    const target = event.target.closest(selector);
+    if (!target || !canDropOn(getTargetId(target))) return;
+    event.preventDefault();
+    target.classList.remove('is-drop-target');
+    await dropOn(getTargetId(target));
+    renderFiles();
+  });
+}
+
+wireDropTarget(document.getElementById('folder-grid'), '[data-open-folder]', (el) => el.dataset.openFolder);
+wireDropTarget(document.getElementById('folder-breadcrumb'), '[data-folder-id]', (el) => el.dataset.folderId || null);
 
 aiSearchBtn.addEventListener('click', async () => {
   const query = fileSearchInput.value.trim();
@@ -2119,6 +2242,57 @@ async function deleteFile(file) {
     )
   );
   await deleteDoc(userDoc('files', file.id));
+}
+
+function folderDescendantIds(folderId) {
+  const ids = new Set();
+  const queue = [folderId];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const f of folders) {
+      if ((f.parentId || null) === id && !ids.has(f.id)) {
+        ids.add(f.id);
+        queue.push(f.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function folderContentsCount(folderId) {
+  const allFolderIds = new Set([folderId, ...folderDescendantIds(folderId)]);
+  const fileCount = files.filter((f) => allFolderIds.has(f.folderId || null)).length;
+  return allFolderIds.size - 1 + fileCount;
+}
+
+async function deleteFolderRecursive(folderId) {
+  for (const cf of folders.filter((f) => (f.parentId || null) === folderId)) {
+    await deleteFolderRecursive(cf.id);
+  }
+  for (const file of files.filter((f) => (f.folderId || null) === folderId)) {
+    await deleteFile(file);
+  }
+  await deleteDoc(userDoc('folders', folderId));
+}
+
+function openFolderEditForm(folder) {
+  openModal(
+    `
+    <h2>Rename folder</h2>
+    <form id="folder-edit-form">
+      <label>Folder name<input type="text" name="name" required value="${escapeHtml(folder.name)}" /></label>
+      <button class="button primary" type="submit">Save</button>
+    </form>
+  `,
+    (root) => {
+      root.querySelector('#folder-edit-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        await updateDoc(userDoc('folders', folder.id), { name: form.get('name').trim() });
+        closeModal();
+      });
+    }
+  );
 }
 
 document.getElementById('file-list').addEventListener('click', (event) => {

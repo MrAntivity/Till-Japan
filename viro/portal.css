@@ -1059,6 +1059,27 @@ body[data-theme='light'] .button.danger {
   color: var(--muted);
 }
 
+.folder-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.folder-card.is-dragging,
+.file-card.is-dragging {
+  opacity: 0.4;
+}
+
+.folder-card.is-drop-target,
+.breadcrumb-item.is-drop-target {
+  border-color: var(--red);
+  background: rgba(176, 176, 176, 0.16);
+}
+
+.breadcrumb-item.is-drop-target {
+  border: 1px dashed var(--red);
+}
+
 .file-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
