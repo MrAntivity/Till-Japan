@@ -348,6 +348,7 @@ function enterPortal() {
 }
 
 function startPortal() {
+  applyTabFromHash(true);
   startClock();
   startWeather();
   updateCalendarWeekLabel();
@@ -380,14 +381,41 @@ document.addEventListener('click', (event) => {
 function requestTabSwitch(tabName, onArrive) {
   if (tabName === 'vault' && !vaultUnlocked) {
     openVaultUnlockPrompt(() => {
-      switchTab('vault');
+      pushTab('vault');
       onArrive?.();
     });
     return;
   }
-  switchTab(tabName);
+  pushTab(tabName);
   onArrive?.();
 }
+
+// Each tab switch gets its own history entry (via the URL hash) so the
+// browser's back/forward buttons step between tabs instead of leaving the
+// portal entirely after the very first switch.
+const PORTAL_TAB_NAMES = ['overview', 'birthdays', 'todos', 'vault', 'files', 'drive', 'calendar', 'contacts'];
+
+function pushTab(tabName) {
+  if (location.hash.slice(1) !== tabName) {
+    history.pushState({ tab: tabName }, '', `#${tabName}`);
+  }
+  switchTab(tabName);
+}
+
+function applyTabFromHash(replace) {
+  const requested = location.hash.slice(1);
+  const tabName = PORTAL_TAB_NAMES.includes(requested) ? requested : 'overview';
+  if (tabName === 'vault' && !vaultUnlocked) {
+    // Never land straight on Vault from history/a refresh without unlocking it again.
+    history.replaceState({ tab: 'overview' }, '', '#overview');
+    switchTab('overview');
+    return;
+  }
+  if (replace) history.replaceState({ tab: tabName }, '', `#${tabName}`);
+  switchTab(tabName);
+}
+
+window.addEventListener('popstate', () => applyTabFromHash(false));
 
 // Briefly flashes and scrolls to the card for `id` - used when jumping to a
 // result from the Overview universal search, since that search spans every
