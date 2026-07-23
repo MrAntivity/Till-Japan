@@ -3540,6 +3540,59 @@ async function runUniversalSearch(query) {
     : 'No matches found.';
 }
 
+// Loose title matching so "dry cleaner" finds a to-do/event titled "Pick Up
+// Dry Cleaner" without requiring an exact match.
+function fuzzyMatchScore(query, title) {
+  const q = (query || '').toLowerCase().trim();
+  const t = (title || '').toLowerCase().trim();
+  if (!q || !t) return 0;
+  if (t === q) return 100;
+  if (t.includes(q) || q.includes(t)) return 80;
+  const qWords = q.split(/\s+/).filter(Boolean);
+  const tWords = t.split(/\s+/).filter(Boolean);
+  const overlap = qWords.filter((w) => tWords.includes(w)).length;
+  return overlap ? (overlap / Math.max(qWords.length, tWords.length)) * 60 : 0;
+}
+
+function findBestMatch(query, items, titleFn) {
+  let best = null;
+  let bestScore = 0;
+  for (const item of items) {
+    const score = fuzzyMatchScore(query, titleFn(item));
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+  return bestScore >= 30 ? best : null;
+}
+
+// calendarEvents only holds whatever week is currently on screen, so a
+// command referencing an event outside that range needs a live search.
+async function findEventAcrossCalendar(query) {
+  try {
+    const calendars = calendarList.length ? calendarList : await fetchVisibleCalendars();
+    const params = new URLSearchParams({
+      q: query,
+      timeMin: addDays(new Date(), -14).toISOString(),
+      timeMax: addDays(new Date(), 90).toISOString(),
+      singleEvents: 'true',
+      maxResults: '10'
+    });
+    const results = await Promise.all(
+      calendars.map((cal) =>
+        calendarApiFetch(`/calendars/${encodeURIComponent(cal.id)}/events?${params}`)
+          .then((data) => (data.items || []).map((e) => ({ ...e, calendarId: cal.id })))
+          .catch(() => [])
+      )
+    );
+    const flat = results.flat();
+    return findBestMatch(query, flat, (e) => e.summary) || flat[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 async function runUniversalCommand(text) {
   universalSearchStatus.hidden = false;
   universalSearchStatus.textContent = 'Thinking…';
@@ -3548,7 +3601,11 @@ async function runUniversalCommand(text) {
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-  const result = await requestAi('smart_command', text, { today: todayIso });
+  const result = await requestAi('smart_command', text, {
+    today: todayIso,
+    todos: [...todos.school, ...todos.personal, ...todos.business].map((t) => t.title),
+    events: calendarEvents.map((e) => e.summary)
+  });
 
   if (result?.intent === 'add' && result.type === 'todo' && result.todo?.title) {
     const list = ['school', 'personal', 'business'].includes(result.todo.list) ? result.todo.list : 'personal';
@@ -3632,8 +3689,95 @@ async function runUniversalCommand(text) {
     return;
   }
 
+  if (result?.intent === 'update_todo' && result.match) {
+    const allTodos = [...todos.school, ...todos.personal, ...todos.business];
+    const match = findBestMatch(result.match, allTodos, (t) => t.title);
+    if (!match) {
+      universalSearchStatus.textContent = `Couldn’t find a to-do matching “${result.match}”.`;
+      return;
+    }
+
+    if (result.action === 'complete') {
+      await updateDoc(userDoc('todos', match.id), { completed: true });
+      universalSearchStatus.textContent = `Marked “${match.title}” as done.`;
+    } else if (result.action === 'delete') {
+      await deleteDoc(userDoc('todos', match.id));
+      universalSearchStatus.textContent = `Deleted “${match.title}”.`;
+    } else if (result.action === 'postpone' && result.deadline) {
+      await updateDoc(userDoc('todos', match.id), { deadline: result.deadline });
+      universalSearchStatus.textContent = `Moved “${match.title}” to ${new Date(`${result.deadline}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`;
+    } else if (result.action === 'move_list' && ['school', 'personal', 'business'].includes(result.list)) {
+      await updateDoc(userDoc('todos', match.id), { category: result.list });
+      universalSearchStatus.textContent = `Moved “${match.title}” to ${CATEGORY_LABEL[result.list]}.`;
+    } else {
+      universalSearchStatus.textContent = `Found “${match.title}” but wasn’t sure what to change.`;
+      return;
+    }
+    universalSearchInput.value = '';
+    return;
+  }
+
+  if (result?.intent === 'update_event' && result.match) {
+    if (!calendarConnected) {
+      universalSearchStatus.textContent = 'Connect Google Calendar first (in the Calendar tab) to manage events this way.';
+      return;
+    }
+
+    universalSearchStatus.textContent = 'Looking for that event…';
+    const match = findBestMatch(result.match, calendarEvents, (e) => e.summary) || (await findEventAcrossCalendar(result.match));
+    if (!match) {
+      universalSearchStatus.textContent = `Couldn’t find an event matching “${result.match}”.`;
+      return;
+    }
+
+    try {
+      if (result.action === 'delete') {
+        await calendarApiFetch(`/calendars/${encodeURIComponent(match.calendarId || 'primary')}/events/${match.id}`, { method: 'DELETE' });
+        universalSearchStatus.textContent = `Deleted “${match.summary}” from your calendar.`;
+      } else if (result.action === 'reschedule') {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const wasAllDay = !!match.start?.date;
+        const newDate = result.date || eventDateIso(match);
+        const newTime = result.time || (!wasAllDay ? match.start.dateTime.slice(11, 16) : null);
+        const durationMs = wasAllDay ? 24 * 60 * 60000 : new Date(match.end.dateTime).getTime() - new Date(match.start.dateTime).getTime();
+        const body = {};
+        if (newTime) {
+          const start = new Date(`${newDate}T${newTime}:00`);
+          const end = new Date(start.getTime() + durationMs);
+          body.start = { dateTime: `${newDate}T${newTime}:00`, timeZone: tz };
+          body.end = {
+            dateTime: `${toIsoDate(end)}T${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}:00`,
+            timeZone: tz
+          };
+        } else {
+          body.start = { date: newDate };
+          body.end = { date: toIsoDate(addDays(new Date(`${newDate}T00:00`), 1)) };
+        }
+        await calendarApiFetch(`/calendars/${encodeURIComponent(match.calendarId || 'primary')}/events/${match.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body)
+        });
+        universalSearchStatus.textContent = `Moved “${match.summary}” to ${new Date(`${newDate}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}${newTime ? ` at ${newTime}` : ''}.`;
+      } else {
+        universalSearchStatus.textContent = `Found “${match.summary}” but wasn’t sure what to change.`;
+        return;
+      }
+      universalSearchInput.value = '';
+      loadWeekEvents();
+    } catch (err) {
+      universalSearchStatus.textContent = err.message || 'Could not update that event.';
+    }
+    return;
+  }
+
   if (result?.intent === 'search') {
     await runUniversalSearch(result.query || text);
+    return;
+  }
+
+  if (result?.intent === 'answer' && result.answer) {
+    universalSearchStatus.textContent = result.answer;
+    universalSearchInput.value = '';
     return;
   }
 

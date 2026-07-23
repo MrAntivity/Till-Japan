@@ -175,6 +175,11 @@ async function smartSearch(openai, query, context) {
 
 async function smartCommand(openai, text, context) {
   const today = context?.today || new Date().toISOString().slice(0, 10);
+  const todoTitles = Array.isArray(context?.todos) ? context.todos.slice(0, 200) : [];
+  const eventTitles = Array.isArray(context?.events) ? context.events.slice(0, 200) : [];
+
+  const inventory = `Current to-dos: ${todoTitles.length ? todoTitles.map((t) => `"${t}"`).join(', ') : '(none)'}
+Current calendar events (only the currently visible range, more may exist): ${eventTitles.length ? eventTitles.map((t) => `"${t}"`).join(', ') : '(none)'}`;
 
   const completion = await openai.chat.completions.create({
     model: MODEL,
@@ -183,19 +188,30 @@ async function smartCommand(openai, text, context) {
     messages: [
       {
         role: 'system',
-        content: `You are the command parser for the search bar of a personal organizer app. Given one short instruction from the user, decide whether they want to ADD a new item (a to-do, a birthday, a contact, or a calendar event) or SEARCH for something that already exists.
+        content: `You are the command parser for the search bar of a personal organizer app. Given one short instruction from the user, decide what they want: ADD a new item (a to-do, a birthday, a contact, or a calendar event), UPDATE/DELETE an existing to-do, UPDATE/DELETE an existing calendar event, SEARCH for something that already exists, or ANSWER a general-knowledge question that has nothing to do with their organizer data.
 
-Today's date is ${today} (YYYY-MM-DD). Resolve relative dates ("tomorrow", "tmrw", "next friday", "in 3 days") against it.
+Today's date is ${today} (YYYY-MM-DD). Resolve relative dates ("today", "tomorrow", "tmrw", "next friday", "in 3 days") against it - "today" always resolves to exactly ${today}, never leave it null when the instruction says "today".
+
+${inventory}
 
 Return ONLY a JSON object in exactly one of these shapes:
 - To-do: {"intent":"add","type":"todo","todo":{"title":"...","list":"school"|"personal"|"business","deadline":"YYYY-MM-DD"|null}}
 - Birthday: {"intent":"add","type":"birthday","birthday":{"name":"...","date":"YYYY-MM-DD"}}
 - Contact: {"intent":"add","type":"contact","contact":{"name":"...","phone":"","email":""}}
 - Event: {"intent":"add","type":"event","event":{"title":"...","date":"YYYY-MM-DD","time":"HH:MM"|null,"durationMinutes":60,"location":""}}
+- Change an existing to-do: {"intent":"update_todo","match":"<the matching to-do's title, copied from the current to-dos list above>","action":"complete"|"delete"|"postpone"|"move_list","deadline":"YYYY-MM-DD"|null,"list":"school"|"personal"|"business"|null}
+- Change an existing calendar event: {"intent":"update_event","match":"<the matching event's title, copied from the current calendar events list above>","action":"reschedule"|"delete","date":"YYYY-MM-DD"|null,"time":"HH:MM"|null}
 - Search: {"intent":"search","query":"..."} (query = the instruction cleaned up for keyword search)
+- General knowledge question unrelated to the user's own data (unit conversions, trivia, quick facts, simple math, definitions, etc.): {"intent":"answer","answer":"<direct, concise answer, one or two sentences>"}
 - Can't tell: {"intent":"unclear"}
 
-Only choose "add" when the instruction clearly describes something new to create. Choose "event" (not "todo") when there's a specific time, or it names a person/place/activity you'd put on a calendar (dinner, meeting, hangout, appointment, class) - choose "todo" for plain tasks/chores with no specific meeting time. Default a to-do's "list" to "personal" unless school or work/business is clearly implied. For events, leave "time" null only for genuinely all-day/no-time-mentioned events, and pick a sensible "durationMinutes" from context (30 for a quick call, 60 as a safe default, longer for things like trips or parties). Write "title"/"name" fields in clean Title Case (e.g. "Take Out Trash", not "take out trash") regardless of how the instruction was capitalized. Leave fields you're unsure about as empty strings (or null). Output nothing but the JSON object - no preamble, no code fences.`
+Only choose "add" when the instruction clearly describes something new to create. Choose "event" (not "todo") when there's a specific time, or it names a person/place/activity you'd put on a calendar (dinner, meeting, hangout, appointment, class) - choose "todo" for plain tasks/chores with no specific meeting time. Default a to-do's "list" to "personal" unless school or work/business is clearly implied. For events, leave "time" null only for genuinely all-day/no-time-mentioned events, and pick a sensible "durationMinutes" from context (30 for a quick call, 60 as a safe default, longer for things like trips or parties).
+
+Choose "update_todo" or "update_event" when the instruction refers to something that should already exist and wants it changed or removed - "mark X as done/complete", "delete/remove X", "postpone/push back/move X to <date>", or (to-dos only) "move X from <list> to <list>" to change its category tag. Use the current to-dos/events lists above to decide which one it is: if the referenced name matches (even loosely/partially) something in the to-dos list, use "update_todo"; if it matches something in the events list instead, use "update_event"; if it could be either, prefer whichever list it matches, and if it matches neither, guess based on phrasing the same way you would for "add" (a specific time mentioned leans event). For "postpone" fill "deadline" with the resolved new date and leave "list" null; for "move_list" fill "list" with the destination category and leave "deadline" null; for "complete"/"delete" leave both null. Same idea for events: "reschedule" fills "date" and/or "time" with the resolved new value(s) (leave whichever didn't change as null), "delete" leaves both null.
+
+Choose "answer" only for questions answerable from general knowledge with nothing to do with the user's to-dos, birthdays, contacts, events, files, or notes.
+
+Write "title"/"name" fields in clean Title Case (e.g. "Take Out Trash", not "take out trash") regardless of how the instruction was capitalized. Leave fields you're unsure about as empty strings (or null). Output nothing but the JSON object - no preamble, no code fences.`
       },
       { role: 'user', content: text }
     ]
