@@ -1,16 +1,23 @@
 # Aiden Yue · Portfolio
 
-This repository contains a single-page personal website designed to be hosted with GitHub Pages. All copy blocks are pre-structured so you can quickly port the content from your LinkedIn profile into each section.
+Personal portfolio at **https://aidenyue.com**, hosted from `main` with GitHub Pages.
 
-## Getting started
+## Public site
 
-1. Replace the placeholder text in `index.html` with the real information from your LinkedIn profile—summary, experience, projects, skills, and contact details.
-2. Update the contact links with the best ways for people to reach you.
-3. Optionally swap the placeholder portrait in `assets/portrait.svg` with a photo of your own.
-4. Commit your changes and push to the `main` branch. Then enable GitHub Pages for the repository.
+- `index.html`: biography, current ventures, Asynq Designs, experience, photos, and contact links.
+- `portfolio.css`: responsive monochrome theme and animation styles.
+- `portfolio.js`: scroll animation, theme preference, photo gallery, and the existing view counter.
+- `assets/photos/`: optimized WebP versions of Aiden's supplied photographs.
+- `assets/keyboard-basin.webp`: PBTfans Basin product render; source below.
 
-## Development
+The page is plain HTML, CSS, and JavaScript, with no installation or build step. Edit the files and push to `main`. Navigation and content work without JavaScript; animations respect reduced-motion settings. Short screens show the keyboard story in normal document flow. The gallery supports next/previous buttons, arrow keys, and Escape to close.
 
-Open `index.html` directly in a browser to preview the site, or use a lightweight development server such as `python -m http.server` for live reloading while editing.
+Google Fonts supplies Inter and Space Grotesk; system fonts remain available offline. The view counter retains its cached fallback when its external service is unavailable.
 
-The page uses Inter and Material Symbols via Google Fonts, so an active internet connection is required to load those assets at runtime.
+## Private portal
+
+`viro/`, `functions/`, Firebase configuration, `styles.css`, and `script.js` retain their existing implementation. The public site has its own CSS and JavaScript so its redesign cannot change the portal's shared theme or behavior.
+
+## Image credit
+
+PBTfans Basin, designed by Asynq Designs. Product render via [KBDfans](https://kbdfans.com/products/pbtfans-doubleshot-basin).
